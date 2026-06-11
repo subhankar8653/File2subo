@@ -5,7 +5,6 @@ from pyrogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
 from pyrogram.errors import FloodWait, UserNotParticipant
-from pyrogram.storage import MemoryStorage
 from config import API_ID, API_HASH, BOT_TOKEN, OWNER_ID, LOG_CHANNEL, LOGGER
 from database import (
     add_user, user_exists, get_all_users, total_users,
@@ -23,7 +22,7 @@ app = Client(
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    storage=MemoryStorage("SuhaniFileBot"),
+    in_memory=True,
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
