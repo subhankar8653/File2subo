@@ -2,7 +2,8 @@ import sys
 import asyncio
 from datetime import datetime
 from aiohttp import web
-from pyrogram import Client
+import pyromod.listen
+from pyromod.listen import Client
 from pyrogram.enums import ParseMode
 
 from config import (
