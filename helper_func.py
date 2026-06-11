@@ -23,21 +23,27 @@ async def decode(string: str) -> str:
 # ── Force Sub filter ──────────────────────────────────────────────
 
 async def is_subscribed(filter, client, update):
-    from config import FORCE_SUB_CHANNEL
-    if not FORCE_SUB_CHANNEL:
-        return True
+    from database.database import get_fsub_channels
     user_id = update.from_user.id
     if user_id in ADMINS:
         return True
-    try:
-        member = await client.get_chat_member(chat_id=FORCE_SUB_CHANNEL, user_id=user_id)
-    except UserNotParticipant:
-        return False
-    return member.status in [
-        ChatMemberStatus.OWNER,
-        ChatMemberStatus.ADMINISTRATOR,
-        ChatMemberStatus.MEMBER,
-    ]
+    fsubs = await get_fsub_channels()
+    if not fsubs:
+        return True
+    for ch_id in fsubs:
+        try:
+            member = await client.get_chat_member(chat_id=ch_id, user_id=user_id)
+            if member.status not in [
+                ChatMemberStatus.OWNER,
+                ChatMemberStatus.ADMINISTRATOR,
+                ChatMemberStatus.MEMBER,
+            ]:
+                return False
+        except UserNotParticipant:
+            return False
+        except Exception:
+            pass
+    return True
 
 subscribed = filters.create(is_subscribed)
 
@@ -92,8 +98,10 @@ async def get_message_id(client, message) -> int:
 
 # ── Auto delete ───────────────────────────────────────────────────
 
-async def delete_file(messages, client, process):
-    await asyncio.sleep(AUTO_DELETE_TIME)
+async def delete_file(messages, client, process, delay: int = None):
+    if delay is None:
+        delay = AUTO_DELETE_TIME
+    await asyncio.sleep(delay)
     for msg in messages:
         try:
             await client.delete_messages(chat_id=msg.chat.id, message_ids=[msg.id])
