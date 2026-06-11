@@ -231,7 +231,7 @@ async def batch_start(client: Client, message: Message):
     if not await is_admin(message.from_user.id):
         return await message.reply("❌ <b>Admins only.</b>")
 
-    _batch_sessions.pop(message.from_user.id, None)
+    _batch_sessions[message.from_user.id] = {"step": "first"}
     await message.reply(
         "📦 <b>Batch Link Generator</b>\n\n"
         "Step 1️⃣: Forward or send the <b>FIRST</b> message of the batch.",
@@ -254,15 +254,10 @@ async def batch_input(client: Client, message: Message):
     user_id = message.from_user.id
     if not await is_admin(user_id):
         return
-    if user_id not in _batch_sessions and "first" not in _batch_sessions.get(user_id, {}):
+    if user_id not in _batch_sessions:
         return
 
     session = _batch_sessions.get(user_id, {})
-
-    # Step 1: first message
-    if isinstance(session, dict) and session == {}:
-        _batch_sessions[user_id] = {"step": "first"}
-        return
 
     if isinstance(session, dict) and session.get("step") == "first":
         wait = await message.reply("⏳ Getting first message ID...")

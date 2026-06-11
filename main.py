@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import signal
 from aiohttp import web
 from config import PORT, LOGGER, MONGO_URI
 from bot import app
@@ -55,7 +56,20 @@ async def main():
     ])
 
     log.info("🚀 Bot is fully operational!")
-    await asyncio.Event().wait()
+
+    # Keep alive — properly handle shutdown signals
+    stop_event = asyncio.Event()
+
+    def _stop():
+        stop_event.set()
+
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _stop)
+
+    await stop_event.wait()
+    log.info("Shutting down...")
+    await app.stop()
 
 if __name__ == "__main__":
     try:
