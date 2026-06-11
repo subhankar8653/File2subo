@@ -1,11 +1,11 @@
-from pyrogram import __version__
+from pyrogram import __version__, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from bot import Bot
 from config import OWNER_ID
 
 
-@Bot.on_callback_query()
+@Bot.on_callback_query(filters.regex("^(about|close)$"))
 async def cb_handler(client: Bot, query: CallbackQuery):
     data = query.data
 

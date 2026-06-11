@@ -82,7 +82,7 @@ async def cmd_settings(client, message: Message):
 #  Settings callbacks
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@Bot.on_callback_query(filters.regex("^set_") | filters.regex("^settings_refresh$"))
+@Bot.on_callback_query(filters.regex("^(set_|settings_refresh)"))
 async def settings_cb(client, query: CallbackQuery):
     # Only admins
     if query.from_user.id not in ADMINS:
