@@ -11,7 +11,10 @@ from config import (
     AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL
 )
 from helper_func import subscribed, decode, get_messages, delete_file
-from database.database import add_user, del_user, full_userbase, present_user
+from database.database import (
+    add_user, del_user, full_userbase, present_user,
+    get_setting,
+)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -22,7 +25,6 @@ from database.database import add_user, del_user, full_userbase, present_user
 async def start_command(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # Register
     if not await present_user(user_id):
         await add_user(user_id)
 
@@ -38,7 +40,6 @@ async def start_command(client: Client, message: Message):
         string = await decode(base64_string)
         argument = string.split("-")
 
-        # Batch: get-{first}-{last}
         if len(argument) == 3:
             try:
                 start = int(int(argument[1]) / abs(client.db_channel.id))
@@ -46,8 +47,6 @@ async def start_command(client: Client, message: Message):
             except Exception:
                 return
             ids = list(range(start, end + 1)) if start <= end else list(range(start, end - 1, -1))
-
-        # Single: get-{id}
         elif len(argument) == 2:
             try:
                 ids = [int(int(argument[1]) / abs(client.db_channel.id))]
@@ -63,6 +62,10 @@ async def start_command(client: Client, message: Message):
             await message.reply("❌ Something went wrong. Try again.")
             return
         await temp_msg.delete()
+
+        # Read settings from DB (override config defaults)
+        protect   = await get_setting("protect_content", PROTECT_CONTENT)
+        auto_del  = await get_setting("auto_delete_time", AUTO_DELETE_TIME)
 
         track_msgs = []
 
@@ -83,9 +86,9 @@ async def start_command(client: Client, message: Message):
                     caption=caption,
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup,
-                    protect_content=PROTECT_CONTENT,
+                    protect_content=protect,
                 )
-                if AUTO_DELETE_TIME and AUTO_DELETE_TIME > 0 and copied:
+                if auto_del and auto_del > 0 and copied:
                     track_msgs.append(copied)
                 await asyncio.sleep(0.5)
             except FloodWait as e:
@@ -95,9 +98,9 @@ async def start_command(client: Client, message: Message):
                     caption=caption,
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup,
-                    protect_content=PROTECT_CONTENT,
+                    protect_content=protect,
                 )
-                if AUTO_DELETE_TIME and AUTO_DELETE_TIME > 0 and copied:
+                if auto_del and auto_del > 0 and copied:
                     track_msgs.append(copied)
             except Exception as e:
                 print(f"Copy error: {e}")
@@ -105,40 +108,39 @@ async def start_command(client: Client, message: Message):
         if track_msgs:
             delete_data = await client.send_message(
                 chat_id=user_id,
-                text=AUTO_DELETE_MSG.format(time=AUTO_DELETE_TIME)
+                text=AUTO_DELETE_MSG.format(time=auto_del)
             )
-            asyncio.create_task(delete_file(track_msgs, client, delete_data))
+            asyncio.create_task(delete_file(track_msgs, client, delete_data, auto_del))
 
         return
 
-    # Normal /start
+    # Normal /start — read start_pic and start_msg from DB
+    db_start_pic = await get_setting("start_pic", "") or START_PIC
+    db_start_msg = await get_setting("start_msg", "") or START_MSG
+
     reply_markup = InlineKeyboardMarkup([[
         InlineKeyboardButton("😊 About Me", callback_data="about"),
         InlineKeyboardButton("🔒 Close", callback_data="close"),
     ]])
 
-    if START_PIC:
+    fmt = dict(
+        first=message.from_user.first_name,
+        last=message.from_user.last_name or "",
+        username=None if not message.from_user.username else "@" + message.from_user.username,
+        mention=message.from_user.mention,
+        id=message.from_user.id,
+    )
+
+    if db_start_pic:
         await message.reply_photo(
-            photo=START_PIC,
-            caption=START_MSG.format(
-                first=message.from_user.first_name,
-                last=message.from_user.last_name or "",
-                username=None if not message.from_user.username else "@" + message.from_user.username,
-                mention=message.from_user.mention,
-                id=message.from_user.id,
-            ),
+            photo=db_start_pic,
+            caption=db_start_msg.format(**fmt),
             reply_markup=reply_markup,
             quote=True,
         )
     else:
         await message.reply_text(
-            text=START_MSG.format(
-                first=message.from_user.first_name,
-                last=message.from_user.last_name or "",
-                username=None if not message.from_user.username else "@" + message.from_user.username,
-                mention=message.from_user.mention,
-                id=message.from_user.id,
-            ),
+            text=db_start_msg.format(**fmt),
             reply_markup=reply_markup,
             disable_web_page_preview=True,
             quote=True,
@@ -146,21 +148,34 @@ async def start_command(client: Client, message: Message):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  /start — NOT subscribed (force sub wall)
+#  /start — NOT subscribed
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @Bot.on_message(filters.command("start") & filters.private)
 async def not_joined(client: Client, message: Message):
-    if bool(JOIN_REQUEST_ENABLE):
-        invite = await client.create_chat_invite_link(
-            chat_id=FORCE_SUB_CHANNEL,
-            creates_join_request=True,
-        )
-        button_url = invite.invite_link
-    else:
-        button_url = client.invitelink
+    # Get active fsub channels from DB
+    from database.database import get_fsub_channels
+    fsubs = await get_fsub_channels()
 
-    buttons = [[InlineKeyboardButton("📢 Join Channel", url=button_url)]]
+    if not fsubs:
+        # No fsub set — treat as subscribed, re-route to start_command
+        return await start_command(client, message)
+
+    buttons = []
+    for ch_id in fsubs:
+        try:
+            if bool(JOIN_REQUEST_ENABLE):
+                invite = await client.create_chat_invite_link(
+                    chat_id=ch_id, creates_join_request=True
+                )
+                url = invite.invite_link
+            else:
+                chat = await client.get_chat(ch_id)
+                url = chat.invite_link or await client.export_chat_invite_link(ch_id)
+            chat = await client.get_chat(ch_id)
+            buttons.append([InlineKeyboardButton(f"📢 {chat.title}", url=url)])
+        except Exception:
+            pass
 
     try:
         buttons.append([
