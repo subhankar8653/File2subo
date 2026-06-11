@@ -78,3 +78,40 @@ async def get_setting(key: str, default=None):
 
 async def set_setting(key: str, value):
     await settings_col.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+# ── Fake Link ─────────────────────────────────────────────────────
+
+fake_link_col = database["fake_link"]
+
+async def set_fake_link(url: str, button_text: str) -> bool:
+    """Fake link set karo — FSub message mein sabse pehle button dikhega."""
+    try:
+        await fake_link_col.update_one(
+            {"_id": "config"},
+            {"$set": {"url": url, "button_text": button_text, "enabled": True}},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        import logging; logging.error(f"set_fake_link error: {e}")
+        return False
+
+async def get_fake_link() -> dict | None:
+    """Fake link config fetch karo. None return hoga agar set nahi ya disabled ho."""
+    try:
+        doc = await fake_link_col.find_one({"_id": "config"})
+        if doc and doc.get("enabled"):
+            return {"url": doc["url"], "button_text": doc["button_text"]}
+        return None
+    except Exception as e:
+        import logging; logging.error(f"get_fake_link error: {e}")
+        return None
+
+async def remove_fake_link() -> bool:
+    """Fake link hata do."""
+    try:
+        result = await fake_link_col.delete_one({"_id": "config"})
+        return result.deleted_count > 0
+    except Exception as e:
+        import logging; logging.error(f"remove_fake_link error: {e}")
+        return False
