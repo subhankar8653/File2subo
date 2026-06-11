@@ -17,15 +17,14 @@ from database.database import (
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def settings_text_and_markup(client):
-    protect      = await get_setting("protect_content", False)
-    auto_del     = await get_setting("auto_delete_time", 0)
-    fsubs        = await get_fsub_channels()
-    start_pic    = await get_setting("start_pic", "")
-    start_msg    = await get_setting("start_msg", "")
-    req_mode     = await get_fsub_request_mode()
-    fake         = await get_fake_link()
+    protect  = await get_setting("protect_content", False)
+    auto_del = await get_setting("auto_delete_time", 0)
+    fsubs    = await get_fsub_channels()
+    start_pic = await get_setting("start_pic", "")
+    start_msg = await get_setting("start_msg", "")
+    req_mode  = await get_fsub_request_mode()
+    fake      = await get_fake_link()
 
-    # Force sub channels list
     fsub_list = ""
     for ch_id in fsubs:
         try:
@@ -52,10 +51,7 @@ async def settings_text_and_markup(client):
                 f"🔒 Protect: {'ON ✅' if protect else 'OFF ❌'}",
                 callback_data="set_protect"
             ),
-            InlineKeyboardButton(
-                "⏱ Auto Delete",
-                callback_data="set_autodel"
-            ),
+            InlineKeyboardButton("⏱ Auto Delete", callback_data="set_autodel"),
         ],
         [
             InlineKeyboardButton("📢 FSub Channels", callback_data="fsub_menu"),
@@ -84,6 +80,32 @@ async def settings_text_and_markup(client):
     return text, markup
 
 
+async def fsub_menu_markup():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("➕ Add FSub", callback_data="set_addsub"),
+            InlineKeyboardButton("🗑 Remove FSub", callback_data="set_removesub"),
+        ],
+        [
+            InlineKeyboardButton("📋 List All FSub", callback_data="set_listsub"),
+        ],
+        [InlineKeyboardButton("🔙 Back", callback_data="settings_back")],
+    ])
+
+
+async def fakelink_menu_markup():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Set Fake Link", callback_data="set_fakelink_set"),
+            InlineKeyboardButton("👁 View", callback_data="set_fakelink_view"),
+        ],
+        [
+            InlineKeyboardButton("🗑 Remove", callback_data="set_fakelink_remove"),
+        ],
+        [InlineKeyboardButton("🔙 Back", callback_data="settings_back")],
+    ])
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  /settings command
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -95,24 +117,45 @@ async def cmd_settings(client, message: Message):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Settings callbacks
+#  ALL Settings Callbacks — Single Handler
+#  (avoids regex conflict with sub-handlers)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@Bot.on_callback_query(filters.regex("^(set_|settings_refresh)"))
+SETTINGS_CB_DATA = {
+    "settings_refresh", "settings_back",
+    "set_protect", "set_autodel",
+    "set_addsub", "set_removesub",
+    "set_startpic", "set_startmsg",
+    "set_listsub", "set_reqmode",
+    "fsub_menu",
+    "fakelink_menu", "set_fakelink_set", "set_fakelink_view", "set_fakelink_remove",
+}
+
+
+@Bot.on_callback_query(filters.regex(
+    r"^(settings_refresh|settings_back|set_protect|set_autodel|set_addsub|set_removesub"
+    r"|set_startpic|set_startmsg|set_listsub|set_reqmode"
+    r"|fsub_menu|fakelink_menu|set_fakelink_set|set_fakelink_view|set_fakelink_remove)$"
+))
 async def settings_cb(client, query: CallbackQuery):
-    # Only admins
     if query.from_user.id not in ADMINS:
         return await query.answer("❌ Admins only!", show_alert=True)
 
     data = query.data
 
-    # ── Refresh ───────────────────────────────────────────────────
+    # ── Refresh ─────────────────────────────────────────────────
     if data == "settings_refresh":
         text, markup = await settings_text_and_markup(client)
         await query.message.edit_text(text, reply_markup=markup)
         return await query.answer("✅ Refreshed!")
 
-    # ── Protect toggle ────────────────────────────────────────────
+    # ── Back to main settings ───────────────────────────────────
+    if data == "settings_back":
+        text, markup = await settings_text_and_markup(client)
+        await query.message.edit_text(text, reply_markup=markup)
+        return await query.answer()
+
+    # ── Protect toggle ──────────────────────────────────────────
     if data == "set_protect":
         current = await get_setting("protect_content", False)
         await set_setting("protect_content", not current)
@@ -121,7 +164,7 @@ async def settings_cb(client, query: CallbackQuery):
         status = "ON ✅" if not current else "OFF ❌"
         return await query.answer(f"🔒 Protect Content: {status}", show_alert=True)
 
-    # ── Auto Delete ───────────────────────────────────────────────
+    # ── Auto Delete ─────────────────────────────────────────────
     if data == "set_autodel":
         await query.answer()
         ask = await query.message.reply(
@@ -139,22 +182,26 @@ async def settings_cb(client, query: CallbackQuery):
         except asyncio.TimeoutError:
             await ask.delete()
             return
-
         await ask.delete()
-        if resp.text == "/cancel":
+        if resp.text.strip() == "/cancel":
             return await resp.delete()
-
         try:
             val = int(resp.text.strip())
             await set_setting("auto_delete_time", val)
-            await resp.reply(
-                f"✅ Auto Delete: <b>{'OFF' if val == 0 else f'{val}s'}</b>"
-            )
+            await resp.reply(f"✅ Auto Delete: <b>{'OFF' if val == 0 else f'{val}s'}</b>")
         except ValueError:
             await resp.reply("❌ Sirf number bhejo (e.g. 300)")
         return
 
-    # ── Add FSub ──────────────────────────────────────────────────
+    # ── FSub Menu ───────────────────────────────────────────────
+    if data == "fsub_menu":
+        await query.message.edit_text(
+            "📢 <b>FSub Channel Settings</b>\n\nKya karna hai?",
+            reply_markup=await fsub_menu_markup(),
+        )
+        return await query.answer()
+
+    # ── Add FSub ────────────────────────────────────────────────
     if data == "set_addsub":
         await query.answer()
         ask = await query.message.reply(
@@ -172,22 +219,17 @@ async def settings_cb(client, query: CallbackQuery):
         except asyncio.TimeoutError:
             await ask.delete()
             return
-
         await ask.delete()
-        if resp.text == "/cancel":
+        if resp.text.strip() == "/cancel":
             return await resp.delete()
-
         try:
             ch_id = int(resp.text.strip())
-            # Verify bot is admin
             chat = await client.get_chat(ch_id)
             await add_fsub(ch_id)
-            # Cache invite link
             try:
                 link = chat.invite_link
                 if not link:
                     await client.export_chat_invite_link(ch_id)
-                client.invitelink = (await client.get_chat(ch_id)).invite_link
             except Exception:
                 pass
             await resp.reply(f"✅ Force sub added: <b>{chat.title}</b> (<code>{ch_id}</code>)")
@@ -197,14 +239,12 @@ async def settings_cb(client, query: CallbackQuery):
             await resp.reply(f"❌ Error: <code>{e}</code>\nBot ko channel ka admin banao pehle.")
         return
 
-    # ── Remove FSub ───────────────────────────────────────────────
+    # ── Remove FSub ─────────────────────────────────────────────
     if data == "set_removesub":
         fsubs = await get_fsub_channels()
         if not fsubs:
             return await query.answer("❌ Koi FSub channel nahi hai!", show_alert=True)
-
         await query.answer()
-        # Build list
         lines = []
         for ch_id in fsubs:
             try:
@@ -212,7 +252,6 @@ async def settings_cb(client, query: CallbackQuery):
                 lines.append(f"• {chat.title}: <code>{ch_id}</code>")
             except Exception:
                 lines.append(f"• <code>{ch_id}</code>")
-
         ask = await query.message.reply(
             "🗑 <b>Kaun sa FSub channel hatana hai?</b>\n\n"
             + "\n".join(lines)
@@ -227,11 +266,9 @@ async def settings_cb(client, query: CallbackQuery):
         except asyncio.TimeoutError:
             await ask.delete()
             return
-
         await ask.delete()
-        if resp.text == "/cancel":
+        if resp.text.strip() == "/cancel":
             return await resp.delete()
-
         try:
             ch_id = int(resp.text.strip())
             await remove_fsub(ch_id)
@@ -240,7 +277,121 @@ async def settings_cb(client, query: CallbackQuery):
             await resp.reply("❌ Valid channel ID bhejo")
         return
 
-    # ── Set Start Pic ─────────────────────────────────────────────
+    # ── List FSub ───────────────────────────────────────────────
+    if data == "set_listsub":
+        await query.answer()
+        fsubs = await get_fsub_channels()
+        if not fsubs:
+            return await query.message.edit_text(
+                "📢 <b>Koi FSub channel set nahi hai.</b>",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("🔙 Back", callback_data="fsub_menu")]]
+                ),
+            )
+        lines = ["<b>📢 Force Sub Channels:</b>\n"]
+        for i, ch_id in enumerate(fsubs, 1):
+            try:
+                chat = await client.get_chat(ch_id)
+                link = f"https://t.me/{chat.username}" if chat.username else "—"
+                lines.append(f"{i}. <b>{chat.title}</b>  🆔 <code>{ch_id}</code>  🔗 {link}")
+            except Exception:
+                lines.append(f"{i}. <code>{ch_id}</code> (info fetch nahi hua)")
+        lines.append(f"\n<b>Total:</b> {len(fsubs)}")
+        return await query.message.edit_text(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 Back", callback_data="fsub_menu")]]
+            ),
+        )
+
+    # ── Request Mode toggle ─────────────────────────────────────
+    if data == "set_reqmode":
+        current = await get_fsub_request_mode()
+        await set_fsub_request_mode(not current)
+        text, markup = await settings_text_and_markup(client)
+        await query.message.edit_text(text, reply_markup=markup)
+        status = "ON ✅" if not current else "OFF ❌"
+        return await query.answer(f"📩 Request Mode: {status}", show_alert=True)
+
+    # ── Fake Link Menu ──────────────────────────────────────────
+    if data == "fakelink_menu":
+        fake = await get_fake_link()
+        status = (
+            f"<b>Current:</b> <code>{fake['button_text']}</code> → <code>{fake['url']}</code>"
+            if fake else "<i>Koi fake link set nahi hai.</i>"
+        )
+        await query.message.edit_text(
+            f"🔗 <b>Fake Link Settings</b>\n\n{status}",
+            reply_markup=await fakelink_menu_markup(),
+        )
+        return await query.answer()
+
+    # ── Fake Link View ──────────────────────────────────────────
+    if data == "set_fakelink_view":
+        fake = await get_fake_link()
+        if fake:
+            return await query.answer(
+                f"Text: {fake['button_text']}\nURL: {fake['url']}",
+                show_alert=True,
+            )
+        return await query.answer("❌ Koi fake link set nahi hai!", show_alert=True)
+
+    # ── Fake Link Remove ────────────────────────────────────────
+    if data == "set_fakelink_remove":
+        result = await remove_fake_link()
+        await query.answer(
+            "✅ Fake link hata diya!" if result else "❌ Koi fake link set nahi tha.",
+            show_alert=True,
+        )
+        fake = await get_fake_link()
+        status = (
+            f"<b>Current:</b> <code>{fake['button_text']}</code> → <code>{fake['url']}</code>"
+            if fake else "<i>Koi fake link set nahi hai.</i>"
+        )
+        return await query.message.edit_text(
+            f"🔗 <b>Fake Link Settings</b>\n\n{status}",
+            reply_markup=await fakelink_menu_markup(),
+        )
+
+    # ── Fake Link Set ───────────────────────────────────────────
+    if data == "set_fakelink_set":
+        await query.answer()
+        ask = await query.message.reply(
+            "🔗 <b>Fake Link set karo</b>\n\n"
+            "Format: <code>URL Button Text</code>\n"
+            "Example: <code>https://t.me/mychannel Join Sponsor</code>\n\n"
+            "/cancel karo quit karne ke liye."
+        )
+        try:
+            resp = await client.listen(
+                chat_id=query.from_user.id,
+                filters=filters.text,
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            await ask.delete()
+            return
+        await ask.delete()
+        if resp.text.strip() == "/cancel":
+            return await resp.delete()
+        parts = resp.text.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            return await resp.reply("❌ Galat format! URL aur Button Text dono chahiye.")
+        url, btn_text = parts[0], parts[1]
+        if not url.startswith(("http://", "https://", "t.me/")):
+            return await resp.reply("❌ Valid URL dalo (http/https/t.me se shuru hona chahiye).")
+        success = await set_fake_link(url, btn_text)
+        if success:
+            await resp.reply(
+                f"✅ <b>Fake Link set!</b>\n\n"
+                f"<b>Button:</b> <code>{btn_text}</code>\n"
+                f"<b>URL:</b> <code>{url}</code>"
+            )
+        else:
+            await resp.reply("❌ Error! Save nahi hua. Dobara try karo.")
+        return
+
+    # ── Set Start Pic ───────────────────────────────────────────
     if data == "set_startpic":
         await query.answer()
         ask = await query.message.reply(
@@ -258,23 +409,21 @@ async def settings_cb(client, query: CallbackQuery):
         except asyncio.TimeoutError:
             await ask.delete()
             return
-
         await ask.delete()
-        if resp.text == "/cancel":
+        if hasattr(resp, 'text') and resp.text and resp.text.strip() == "/cancel":
             return await resp.delete()
-
-        if resp.text and resp.text.lower() == "remove":
+        if hasattr(resp, 'text') and resp.text and resp.text.lower() == "remove":
             await set_setting("start_pic", "")
             await resp.reply("✅ Start pic removed.")
         elif resp.photo:
             await set_setting("start_pic", resp.photo.file_id)
             await resp.reply("✅ Start pic set!")
-        elif resp.text:
+        elif hasattr(resp, 'text') and resp.text:
             await set_setting("start_pic", resp.text.strip())
             await resp.reply("✅ Start pic URL set!")
         return
 
-    # ── Set Start Message ─────────────────────────────────────────
+    # ── Set Start Message ───────────────────────────────────────
     if data == "set_startmsg":
         await query.answer()
         ask = await query.message.reply(
@@ -297,11 +446,9 @@ async def settings_cb(client, query: CallbackQuery):
         except asyncio.TimeoutError:
             await ask.delete()
             return
-
         await ask.delete()
-        if resp.text == "/cancel":
+        if resp.text.strip() == "/cancel":
             return await resp.delete()
-
         if resp.text.lower() == "remove":
             await set_setting("start_msg", "")
             await resp.reply("✅ Start message reset to default.")
@@ -309,193 +456,3 @@ async def settings_cb(client, query: CallbackQuery):
             await set_setting("start_msg", resp.text)
             await resp.reply("✅ Start message set!")
         return
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  FSub Menu & List
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-async def fsub_menu_markup():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📢 Add FSub", callback_data="set_addsub"),
-            InlineKeyboardButton("🗑 Remove FSub", callback_data="set_removesub"),
-        ],
-        [
-            InlineKeyboardButton("📋 List All FSub", callback_data="set_listsub"),
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data="settings_back")],
-    ])
-
-
-@Bot.on_callback_query(filters.regex("^fsub_menu$"))
-async def fsub_menu_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    await query.message.edit_text(
-        "📢 <b>FSub Channel Settings</b>\n\nKya karna hai?",
-        reply_markup=await fsub_menu_markup(),
-    )
-    await query.answer()
-
-
-@Bot.on_callback_query(filters.regex("^set_listsub$"))
-async def listsub_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    await query.answer()
-    fsubs = await get_fsub_channels()
-    if not fsubs:
-        return await query.message.edit_text(
-            "📢 <b>Koi FSub channel set nahi hai.</b>",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="fsub_menu")]]),
-        )
-    lines = ["<b>📢 Force Sub Channels:</b>\n"]
-    for i, ch_id in enumerate(fsubs, 1):
-        try:
-            chat = await client.get_chat(ch_id)
-            link = f"https://t.me/{chat.username}" if chat.username else "—"
-            lines.append(f"{i}. <b>{chat.title}</b>  🆔 <code>{ch_id}</code>  🔗 {link}")
-        except Exception:
-            lines.append(f"{i}. <code>{ch_id}</code> (info fetch nahi hua)")
-    lines.append(f"\n<b>Total:</b> {len(fsubs)}")
-    await query.message.edit_text(
-        "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="fsub_menu")]]),
-    )
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Request Mode Toggle
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@Bot.on_callback_query(filters.regex("^set_reqmode$"))
-async def reqmode_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    current = await get_fsub_request_mode()
-    await set_fsub_request_mode(not current)
-    text, markup = await settings_text_and_markup(client)
-    await query.message.edit_text(text, reply_markup=markup)
-    status = "ON ✅" if not current else "OFF ❌"
-    await query.answer(f"📩 Request Mode: {status}", show_alert=True)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Fake Link Menu
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-async def fakelink_menu_markup():
-    fake = await get_fake_link()
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✏️ Set Fake Link", callback_data="set_fakelink_set"),
-            InlineKeyboardButton("👁 View", callback_data="set_fakelink_view"),
-        ],
-        [
-            InlineKeyboardButton("🗑 Remove", callback_data="set_fakelink_remove"),
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data="settings_back")],
-    ])
-
-
-@Bot.on_callback_query(filters.regex("^fakelink_menu$"))
-async def fakelink_menu_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    fake = await get_fake_link()
-    status = f"<b>Current:</b> <code>{fake['button_text']}</code> → <code>{fake['url']}</code>" if fake else "<i>Koi fake link set nahi hai.</i>"
-    await query.message.edit_text(
-        f"🔗 <b>Fake Link Settings</b>\n\n{status}",
-        reply_markup=await fakelink_menu_markup(),
-    )
-    await query.answer()
-
-
-@Bot.on_callback_query(filters.regex("^set_fakelink_view$"))
-async def fakelink_view_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    fake = await get_fake_link()
-    if fake:
-        await query.answer(
-            f"Text: {fake['button_text']}\nURL: {fake['url']}",
-            show_alert=True,
-        )
-    else:
-        await query.answer("❌ Koi fake link set nahi hai!", show_alert=True)
-
-
-@Bot.on_callback_query(filters.regex("^set_fakelink_remove$"))
-async def fakelink_remove_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    result = await remove_fake_link()
-    if result:
-        await query.answer("✅ Fake link hata diya!", show_alert=True)
-    else:
-        await query.answer("❌ Koi fake link set nahi tha.", show_alert=True)
-    # Refresh fake link menu
-    fake = await get_fake_link()
-    status = f"<b>Current:</b> <code>{fake['button_text']}</code> → <code>{fake['url']}</code>" if fake else "<i>Koi fake link set nahi hai.</i>"
-    await query.message.edit_text(
-        f"🔗 <b>Fake Link Settings</b>\n\n{status}",
-        reply_markup=await fakelink_menu_markup(),
-    )
-
-
-@Bot.on_callback_query(filters.regex("^set_fakelink_set$"))
-async def fakelink_set_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    await query.answer()
-    ask = await query.message.reply(
-        "🔗 <b>Fake Link set karo</b>\n\n"
-        "Format: <code>URL Button Text</code>\n"
-        "Example: <code>https://t.me/mychannel Join Sponsor</code>\n\n"
-        "/cancel karo quit karne ke liye."
-    )
-    try:
-        resp = await client.listen(
-            chat_id=query.from_user.id,
-            filters=filters.text,
-            timeout=60,
-        )
-    except asyncio.TimeoutError:
-        await ask.delete()
-        return
-
-    await ask.delete()
-    if resp.text.strip() == "/cancel":
-        return await resp.delete()
-
-    parts = resp.text.strip().split(maxsplit=1)
-    if len(parts) < 2:
-        return await resp.reply("❌ Galat format! URL aur Button Text dono chahiye.")
-
-    url, btn_text = parts[0], parts[1]
-    if not url.startswith(("http://", "https://", "t.me/")):
-        return await resp.reply("❌ Valid URL dalo (http/https/t.me se shuru hona chahiye).")
-
-    success = await set_fake_link(url, btn_text)
-    if success:
-        await resp.reply(
-            f"✅ <b>Fake Link set!</b>\n\n"
-            f"<b>Button:</b> <code>{btn_text}</code>\n"
-            f"<b>URL:</b> <code>{url}</code>"
-        )
-    else:
-        await resp.reply("❌ Error! Save nahi hua. Dobara try karo.")
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Back to Main Settings
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@Bot.on_callback_query(filters.regex("^settings_back$"))
-async def settings_back_cb(client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        return await query.answer("❌ Admins only!", show_alert=True)
-    text, markup = await settings_text_and_markup(client)
-    await query.message.edit_text(text, reply_markup=markup)
-    await query.answer()
