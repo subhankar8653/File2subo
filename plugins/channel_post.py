@@ -13,7 +13,8 @@ from helper_func import encode
 @Bot.on_message(
     filters.private & filters.user(ADMINS) &
     ~filters.command(["start", "users", "broadcast", "batch", "genlink", "stats",
-                      "addadmin", "removeadmin", "ban", "unban", "addsub", "removesub", "protect"])
+                      "addadmin", "removeadmin", "ban", "unban", "addsub", "removesub", "protect",
+                      "settings", "cancel"])
 )
 async def channel_post(client: Client, message: Message):
     reply_text = await message.reply("⏳ Please wait...", quote=True)
