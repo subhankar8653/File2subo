@@ -70,6 +70,19 @@ async def remove_fsub(channel_id: int):
 async def get_fsub_channels() -> list:
     return [doc["_id"] async for doc in fsub_col.find()]
 
+async def get_fsub_request_mode() -> bool:
+    """Global request mode — agar True hai to FSub channels join-request link banayenge."""
+    doc = await settings_col.find_one({"_id": "request_mode"})
+    return bool(doc["value"]) if doc else False
+
+async def set_fsub_request_mode(enabled: bool):
+    """Global request mode on/off karo."""
+    await settings_col.update_one(
+        {"_id": "request_mode"},
+        {"$set": {"value": enabled}},
+        upsert=True,
+    )
+
 # ── Settings ──────────────────────────────────────────────────────
 
 async def get_setting(key: str, default=None):
