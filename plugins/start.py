@@ -154,7 +154,7 @@ async def start_command(client: Client, message: Message):
 @Bot.on_message(filters.command("start") & filters.private)
 async def not_joined(client: Client, message: Message):
     # Get active fsub channels from DB
-    from database.database import get_fsub_channels
+    from database.database import get_fsub_channels, get_fake_link
     fsubs = await get_fsub_channels()
 
     if not fsubs:
@@ -162,6 +162,12 @@ async def not_joined(client: Client, message: Message):
         return await start_command(client, message)
 
     buttons = []
+
+    # Fake link button — sabse pehle dikhao (same as link-sharing-bot logic)
+    fake = await get_fake_link()
+    if fake:
+        buttons.append([InlineKeyboardButton(fake["button_text"], url=fake["url"])])
+
     for ch_id in fsubs:
         try:
             if bool(JOIN_REQUEST_ENABLE):

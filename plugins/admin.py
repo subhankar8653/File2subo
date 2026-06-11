@@ -6,7 +6,7 @@ from config import ADMINS, OWNER_ID
 from database.database import (
     add_admin, remove_admin, get_all_admins,
     ban_user, unban_user,
-    add_fsub, remove_fsub, get_fsub_channels,
+    get_fsub_channels,
     get_setting, set_setting, total_users,
 )
 from helper_func import get_readable_time
@@ -48,23 +48,6 @@ async def cmd_unban(client, message: Message):
     await unban_user(uid)
     await message.reply(f"✅ <code>{uid}</code> unbanned.")
 
-
-@Bot.on_message(filters.command("addsub") & filters.private & filters.user(ADMINS))
-async def cmd_addsub(client, message: Message):
-    if len(message.command) < 2:
-        return await message.reply("Usage: /addsub <channel_id>")
-    ch_id = int(message.command[1])
-    await add_fsub(ch_id)
-    await message.reply(f"✅ Force sub added: <code>{ch_id}</code>.")
-
-
-@Bot.on_message(filters.command("removesub") & filters.private & filters.user(ADMINS))
-async def cmd_removesub(client, message: Message):
-    if len(message.command) < 2:
-        return await message.reply("Usage: /removesub <channel_id>")
-    ch_id = int(message.command[1])
-    await remove_fsub(ch_id)
-    await message.reply(f"✅ Force sub removed: <code>{ch_id}</code>.")
 
 
 @Bot.on_message(filters.command("protect") & filters.private & filters.user(ADMINS))
