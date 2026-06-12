@@ -23,9 +23,12 @@ async def decode(string: str) -> str:
 # ── Force Sub filter ──────────────────────────────────────────────
 
 async def is_subscribed(filter, client, update):
-    from database.database import get_fsub_channels, get_fsub_request_mode, has_fsub_request
+    from database.database import get_fsub_channels, get_fsub_request_mode, has_fsub_request, has_premium_access
     user_id = update.from_user.id
     if user_id in ADMINS:
+        return True
+    # ── Premium users: FSub bypass — fast priority, koi check nahi ──
+    if await has_premium_access(user_id):
         return True
     fsubs = await get_fsub_channels()
     if not fsubs:
@@ -139,3 +142,33 @@ def get_readable_time(seconds: int) -> str:
     time_list.reverse()
     up_time += ":".join(time_list)
     return up_time
+
+# ── Premium duration parser ────────────────────────────────────────
+# "30 min", "12 hour", "1 day", "1 month", "1 year" → seconds
+
+def parse_duration(amount_str: str, unit_str: str) -> int:
+    try:
+        value = int(amount_str)
+    except (TypeError, ValueError):
+        return 0
+
+    unit = unit_str.lower().rstrip("s")  # "days" -> "day"
+
+    mult = {
+        "sec":    1,
+        "second": 1,
+        "s":      1,
+        "min":    60,
+        "minute": 60,
+        "m":      60,
+        "hour":   3600,
+        "hr":     3600,
+        "h":      3600,
+        "day":    86400,
+        "d":      86400,
+        "month":  86400 * 30,
+        "year":   86400 * 365,
+        "y":      86400 * 365,
+    }.get(unit, 0)
+
+    return value * mult
