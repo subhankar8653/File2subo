@@ -1,4 +1,5 @@
 import asyncio
+import secrets
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatJoinRequest
@@ -16,13 +17,15 @@ from database.database import (
     get_setting,
     get_fsub_channels, get_fsub_request_mode,
     add_fsub_request, remove_fsub_request, has_fsub_request,
+    get_fake_link, get_fsub_channel_name,
+    get_shortener_settings, get_bot_config,
+    has_premium_access,
+    create_verify_token, get_verify_token, mark_token_used,
 )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ChatJoinRequest handler — Request Mode
-#  Jab user join request bhejta hai tab DB mein record karo.
-#  Jab approve hota hai tab record hata do.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @Bot.on_chat_join_request()
@@ -31,19 +34,75 @@ async def on_join_request(client: Client, request: ChatJoinRequest):
         req_mode = await get_fsub_request_mode()
         if not req_mode:
             return
-
         fsubs = await get_fsub_channels()
         ch_id = request.chat.id
         uid   = request.from_user.id
-
         if ch_id not in fsubs:
             return
-
-        # Request pending record karo
         await add_fsub_request(ch_id, uid)
-
     except Exception as e:
         import logging; logging.getLogger(__name__).error(f"on_join_request error: {e}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Shortener verify handler
+#  User /start vfy_<token> ke saath aata hai
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def _handle_verify_token(client: Client, message: Message, uid: int, token: str):
+    doc = await get_verify_token(token)
+
+    if not doc:
+        return await message.reply(
+            "<b>⚠️ Invalid ya expired verification link.</b>\n\n"
+            "<i>Dobara try karo — original file link pe click karo.</i>"
+        )
+
+    if doc.get("used"):
+        return await message.reply(
+            "<b>⚠️ Yeh link pehle use ho chuka hai.</b>\n\n"
+            "<i>Dobara file link pe click karo.</i>"
+        )
+
+    if doc.get("user_id") and doc["user_id"] != uid:
+        return await message.reply("<b>⚠️ Yeh link tumhare liye nahi hai.</b>")
+
+    # Token valid — temp premium do
+    cfg     = await get_bot_config()
+    seconds = cfg.get("verify_premium_seconds", 86400)  # default 24h
+
+    from database.database import add_premium, get_premium_expiry
+    await add_premium(uid, seconds)
+
+    # Token use mark karo
+    await mark_token_used(token)
+
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    dur = f"{h}h" if m == 0 else f"{h}h {m}m"
+
+    # User ko original deep link dobara bhejo
+    original_param = doc.get("original_param", "")
+    if original_param:
+        bot_link = f"https://t.me/{client.username}?start={original_param}"
+        await message.reply(
+            f"✅ <b>Verified!</b>\n\n"
+            f"<blockquote>"
+            f"⚡ Agle <b>{dur}</b> tak direct links milenge — koi shortener nahi!\n"
+            f"Time khatam hone ke baad dobara ad complete karna padega."
+            f"</blockquote>",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📂 File Lo", url=bot_link)
+            ]])
+        )
+    else:
+        await message.reply(
+            f"✅ <b>Verified!</b>\n\n"
+            f"<blockquote>"
+            f"⚡ Agle <b>{dur}</b> tak direct links milenge!\n"
+            f"Ab original file link dobara click karo."
+            f"</blockquote>"
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -59,14 +118,20 @@ async def start_command(client: Client, message: Message):
 
     text = message.text
 
-    # Deep link — file delivery
+    # ── Verify token (shortener ad complete ke baad) ───────────────
     if len(text) > 7:
+        param = text.split(" ", 1)[1]
+
+        if param.startswith("vfy_"):
+            return await _handle_verify_token(client, message, user_id, param[4:])
+
+        # ── Normal deep link — file delivery ──────────────────────
         try:
-            base64_string = text.split(" ", 1)[1]
+            base64_string = param
         except Exception:
             return
 
-        string = await decode(base64_string)
+        string   = await decode(base64_string)
         argument = string.split("-")
 
         if len(argument) == 3:
@@ -84,6 +149,45 @@ async def start_command(client: Client, message: Message):
         else:
             return
 
+        # ── Shortener check ────────────────────────────────────────
+        # Agar shortener ON hai aur user premium nahi — pehle ad dikhao
+        s = await get_shortener_settings()
+        if s["enabled"] and s["api"] and not await has_premium_access(user_id):
+            # Token banao
+            token    = secrets.token_urlsafe(12)
+            await create_verify_token(user_id, token)
+
+            # original_param save karo — verify ke baad yahi use hoga
+            from database.database import verify_tokens_col
+            await verify_tokens_col.update_one(
+                {"token": token},
+                {"$set": {"original_param": base64_string}}
+            )
+
+            from plugins.shortener import shorten_link
+            bot_link  = f"https://t.me/{client.username}?start=vfy_{token}"
+            short_url = await shorten_link(bot_link)
+
+            await message.reply(
+                "<b>🔗 File milne se pehle ek step complete karo!</b>\n\n"
+                "<blockquote>"
+                "Niche button dabao, ek short ad complete karo.\n"
+                "Uske baad automatically file mil jaegi — <b>koi waiting nahi!</b>\n\n"
+                "⚡ <b>Pehle se verified ho?</b> Toh seedha file milegi."
+                "</blockquote>",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔗 Get File", url=short_url)
+                ]])
+            )
+
+            # Shortener tutorial — 30s baad check
+            from plugins.tutorial import send_shortener_tutorial_if_not_verified
+            asyncio.create_task(
+                send_shortener_tutorial_if_not_verified(client, user_id, token)
+            )
+            return
+
+        # ── Direct file delivery ───────────────────────────────────
         temp_msg = await message.reply("⏳ <b>Please wait...</b>")
         try:
             messages = await get_messages(client, ids)
@@ -92,10 +196,8 @@ async def start_command(client: Client, message: Message):
             return
         await temp_msg.delete()
 
-        # Read settings from DB (override config defaults)
-        protect   = await get_setting("protect_content", PROTECT_CONTENT)
-        auto_del  = await get_setting("auto_delete_time", AUTO_DELETE_TIME)
-
+        protect  = await get_setting("protect_content", PROTECT_CONTENT)
+        auto_del = await get_setting("auto_delete_time", AUTO_DELETE_TIME)
         track_msgs = []
 
         for msg in messages:
@@ -135,7 +237,6 @@ async def start_command(client: Client, message: Message):
                 print(f"Copy error: {e}")
 
         if track_msgs:
-            # Seconds ko readable format mein convert karo
             if auto_del >= 60:
                 mins = auto_del // 60
                 secs = auto_del % 60
@@ -150,7 +251,7 @@ async def start_command(client: Client, message: Message):
 
         return
 
-    # Normal /start — read start_pic and start_msg from DB
+    # Normal /start
     db_start_pic = await get_setting("start_pic", "") or START_PIC
     db_start_msg = await get_setting("start_msg", "") or START_MSG
 
@@ -189,17 +290,14 @@ async def start_command(client: Client, message: Message):
 
 @Bot.on_message(filters.command("start") & filters.private)
 async def not_joined(client: Client, message: Message):
-    from database.database import get_fake_link, get_fsub_channel_name
     fsubs = await get_fsub_channels()
 
     if not fsubs:
-        # No fsub set — treat as subscribed, re-route to start_command
         return await start_command(client, message)
 
     req_mode = await get_fsub_request_mode()
-    buttons = []
+    buttons  = []
 
-    # Fake link button — sabse pehle dikhao
     fake = await get_fake_link()
     if fake:
         buttons.append([InlineKeyboardButton(fake["button_text"], url=fake["url"])])
@@ -213,31 +311,24 @@ async def not_joined(client: Client, message: Message):
                 url = invite.invite_link
             else:
                 chat = await client.get_chat(ch_id)
-                url = chat.invite_link or await client.export_chat_invite_link(ch_id)
+                url  = chat.invite_link or await client.export_chat_invite_link(ch_id)
             chat = await client.get_chat(ch_id)
-
-            # Custom name check — agar set hai toh wahi use karo
             custom_name = await get_fsub_channel_name(ch_id)
             btn_text = custom_name if custom_name else f"📢 {chat.title}"
-
             buttons.append([InlineKeyboardButton(btn_text, url=url)])
         except Exception:
             pass
 
     try:
-        buttons.append([
-            InlineKeyboardButton(
-                "🔄 Try Again",
-                url=f"https://t.me/{client.username}?start={message.command[1]}"
-            )
-        ])
+        buttons.append([InlineKeyboardButton(
+            "🔄 Try Again",
+            url=f"https://t.me/{client.username}?start={message.command[1]}"
+        )])
     except IndexError:
-        buttons.append([
-            InlineKeyboardButton(
-                "🔄 Try Again",
-                url=f"https://t.me/{client.username}?start=start"
-            )
-        ])
+        buttons.append([InlineKeyboardButton(
+            "🔄 Try Again",
+            url=f"https://t.me/{client.username}?start=start"
+        )])
 
     await message.reply(
         text=FORCE_MSG.format(
@@ -251,6 +342,33 @@ async def not_joined(client: Client, message: Message):
         quote=True,
         disable_web_page_preview=True,
     )
+
+    # FSub tutorial — 30s baad check
+    uid = message.from_user.id
+    async def _check_joined_all(check_uid: int) -> bool:
+        try:
+            from pyrogram.enums import ChatMemberStatus
+            from pyrogram.errors import UserNotParticipant
+            chs = await get_fsub_channels()
+            for cid in chs:
+                try:
+                    m = await client.get_chat_member(cid, check_uid)
+                    if m.status not in {
+                        ChatMemberStatus.OWNER,
+                        ChatMemberStatus.ADMINISTRATOR,
+                        ChatMemberStatus.MEMBER,
+                    }:
+                        return False
+                except Exception:
+                    if req_mode and await has_fsub_request(cid, check_uid):
+                        continue
+                    return False
+            return True
+        except Exception:
+            return False
+
+    from plugins.tutorial import send_fsub_tutorial_if_not_joined
+    asyncio.create_task(send_fsub_tutorial_if_not_joined(client, uid, _check_joined_all))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -269,7 +387,7 @@ async def send_broadcast(client: Bot, message: Message):
     if not message.reply_to_message:
         return await message.reply("↩️ Reply to a message to broadcast it.")
 
-    query = await full_userbase()
+    query         = await full_userbase()
     broadcast_msg = message.reply_to_message
     total = successful = blocked = deleted = unsuccessful = 0
 
