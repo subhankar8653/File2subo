@@ -135,9 +135,16 @@ async def start_command(client: Client, message: Message):
                 print(f"Copy error: {e}")
 
         if track_msgs:
+            # Seconds ko readable format mein convert karo
+            if auto_del >= 60:
+                mins = auto_del // 60
+                secs = auto_del % 60
+                time_str = f"{mins} minute{'s' if mins > 1 else ''}" + (f" {secs} seconds" if secs else "")
+            else:
+                time_str = f"{auto_del} seconds"
             delete_data = await client.send_message(
                 chat_id=user_id,
-                text=AUTO_DELETE_MSG.format(time=auto_del)
+                text=AUTO_DELETE_MSG.format(time=time_str)
             )
             asyncio.create_task(delete_file(track_msgs, client, delete_data, auto_del))
 
