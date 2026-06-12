@@ -1,4 +1,5 @@
 import asyncio
+import re
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
@@ -9,6 +10,7 @@ from database.database import (
     add_fsub, remove_fsub, get_fsub_channels,
     get_fake_link, set_fake_link, remove_fake_link,
     get_fsub_request_mode, set_fsub_request_mode,
+    get_fsub_channel_name, set_fsub_channel_name, clear_fsub_channel_name,
 )
 
 
@@ -29,7 +31,9 @@ async def settings_text_and_markup(client):
     for ch_id in fsubs:
         try:
             chat = await client.get_chat(ch_id)
-            fsub_list += f"\n  • {chat.title} (<code>{ch_id}</code>)"
+            custom_name = await get_fsub_channel_name(ch_id)
+            name_display = f" [{custom_name}]" if custom_name else ""
+            fsub_list += f"\n  • {chat.title}{name_display} (<code>{ch_id}</code>)"
         except Exception:
             fsub_list += f"\n  • <code>{ch_id}</code>"
 
@@ -87,6 +91,7 @@ async def fsub_menu_markup():
             InlineKeyboardButton("🗑 Remove FSub", callback_data="set_removesub"),
         ],
         [
+            InlineKeyboardButton("✏️ Rename Button", callback_data="set_rename_fsub"),
             InlineKeyboardButton("📋 List All FSub", callback_data="set_listsub"),
         ],
         [InlineKeyboardButton("🔙 Back", callback_data="settings_back")],
@@ -118,24 +123,13 @@ async def cmd_settings(client, message: Message):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ALL Settings Callbacks — Single Handler
-#  (avoids regex conflict with sub-handlers)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-SETTINGS_CB_DATA = {
-    "settings_refresh", "settings_back",
-    "set_protect", "set_autodel",
-    "set_addsub", "set_removesub",
-    "set_startpic", "set_startmsg",
-    "set_listsub", "set_reqmode",
-    "fsub_menu",
-    "fakelink_menu", "set_fakelink_set", "set_fakelink_view", "set_fakelink_remove",
-}
-
 
 @Bot.on_callback_query(filters.regex(
     r"^(settings_refresh|settings_back|set_protect|set_autodel|set_addsub|set_removesub"
     r"|set_startpic|set_startmsg|set_listsub|set_reqmode"
-    r"|fsub_menu|fakelink_menu|set_fakelink_set|set_fakelink_view|set_fakelink_remove)$"
+    r"|fsub_menu|fakelink_menu|set_fakelink_set|set_fakelink_view|set_fakelink_remove"
+    r"|set_rename_fsub)$"
 ))
 async def settings_cb(client, query: CallbackQuery):
     if query.from_user.id not in ADMINS:
@@ -277,6 +271,99 @@ async def settings_cb(client, query: CallbackQuery):
             await resp.reply("❌ Valid channel ID bhejo")
         return
 
+    # ── Rename FSub Button ──────────────────────────────────────
+    if data == "set_rename_fsub":
+        fsubs = await get_fsub_channels()
+        if not fsubs:
+            return await query.answer("❌ Koi FSub channel nahi hai!", show_alert=True)
+        await query.answer()
+
+        # Channel list dikhao
+        lines = []
+        for ch_id in fsubs:
+            try:
+                chat = await client.get_chat(ch_id)
+                custom = await get_fsub_channel_name(ch_id)
+                current_name = f" (ab: <i>{custom}</i>)" if custom else ""
+                lines.append(f"• {chat.title}{current_name}: <code>{ch_id}</code>")
+            except Exception:
+                lines.append(f"• <code>{ch_id}</code>")
+
+        ask = await query.message.reply(
+            "✏️ <b>FSub Button Rename</b>\n\n"
+            "Kaun se channel ka button rename karna hai?\n"
+            "Niche list se Channel ID copy karke bhejo:\n\n"
+            + "\n".join(lines)
+            + "\n\n/cancel karo quit karne ke liye."
+        )
+        try:
+            resp_id = await client.listen(
+                chat_id=query.from_user.id,
+                filters=filters.text,
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            await ask.delete()
+            return
+        await ask.delete()
+        if resp_id.text.strip() == "/cancel":
+            return await resp_id.delete()
+
+        # Channel ID validate karo
+        id_text = resp_id.text.strip()
+        if not re.match(r"^-100\d+$", id_text):
+            return await resp_id.reply("❌ Invalid channel ID. Format: <code>-1001234567890</code>")
+
+        ch_id = int(id_text)
+        if ch_id not in fsubs:
+            return await resp_id.reply("❌ Yeh channel FSub list mein nahi hai.")
+
+        # Naya naam maango
+        ask2 = await resp_id.reply(
+            "✏️ <b>Ab naya button naam bhejo:</b>\n"
+            "Jo bhi text likhoge wahi button pe dikhega.\n\n"
+            "<code>remove</code> bhejo custom naam hatane ke liye (wapas channel title).\n"
+            "/cancel karo quit karne ke liye."
+        )
+        try:
+            resp_name = await client.listen(
+                chat_id=query.from_user.id,
+                filters=filters.text,
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            await ask2.delete()
+            return
+        await ask2.delete()
+        if resp_name.text.strip() == "/cancel":
+            return await resp_name.delete()
+
+        new_name = resp_name.text.strip()
+        if new_name.lower() == "remove":
+            await clear_fsub_channel_name(ch_id)
+            return await resp_name.reply(
+                f"✅ <b>Custom naam hata diya!</b>\n"
+                f"Ab channel ka actual title use hoga.\n"
+                f"🆔 <code>{ch_id}</code>"
+            )
+
+        if len(new_name) > 50:
+            return await resp_name.reply("❌ Naam 50 characters se kam rakho.")
+
+        success = await set_fsub_channel_name(ch_id, new_name)
+        if success:
+            await resp_name.reply(
+                f"✅ <b>Button rename ho gaya!</b>\n\n"
+                f"🆔 Channel: <code>{ch_id}</code>\n"
+                f"✏️ Button text: <b>{new_name}</b>"
+            )
+        else:
+            await resp_name.reply(
+                "❌ Rename failed. Channel pehle add karo:\n"
+                "<code>/addsub &lt;channel_id&gt;</code>"
+            )
+        return
+
     # ── List FSub ───────────────────────────────────────────────
     if data == "set_listsub":
         await query.answer()
@@ -293,7 +380,9 @@ async def settings_cb(client, query: CallbackQuery):
             try:
                 chat = await client.get_chat(ch_id)
                 link = f"https://t.me/{chat.username}" if chat.username else "—"
-                lines.append(f"{i}. <b>{chat.title}</b>  🆔 <code>{ch_id}</code>  🔗 {link}")
+                custom = await get_fsub_channel_name(ch_id)
+                name_tag = f" [<i>{custom}</i>]" if custom else ""
+                lines.append(f"{i}. <b>{chat.title}</b>{name_tag}  🆔 <code>{ch_id}</code>  🔗 {link}")
             except Exception:
                 lines.append(f"{i}. <code>{ch_id}</code> (info fetch nahi hua)")
         lines.append(f"\n<b>Total:</b> {len(fsubs)}")

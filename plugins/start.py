@@ -1,7 +1,7 @@
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatJoinRequest
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
@@ -14,7 +14,36 @@ from helper_func import subscribed, decode, get_messages, delete_file
 from database.database import (
     add_user, del_user, full_userbase, present_user,
     get_setting,
+    get_fsub_channels, get_fsub_request_mode,
+    add_fsub_request, remove_fsub_request, has_fsub_request,
 )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ChatJoinRequest handler — Request Mode
+#  Jab user join request bhejta hai tab DB mein record karo.
+#  Jab approve hota hai tab record hata do.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Bot.on_chat_join_request()
+async def on_join_request(client: Client, request: ChatJoinRequest):
+    try:
+        req_mode = await get_fsub_request_mode()
+        if not req_mode:
+            return
+
+        fsubs = await get_fsub_channels()
+        ch_id = request.chat.id
+        uid   = request.from_user.id
+
+        if ch_id not in fsubs:
+            return
+
+        # Request pending record karo
+        await add_fsub_request(ch_id, uid)
+
+    except Exception as e:
+        import logging; logging.getLogger(__name__).error(f"on_join_request error: {e}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -153,8 +182,7 @@ async def start_command(client: Client, message: Message):
 
 @Bot.on_message(filters.command("start") & filters.private)
 async def not_joined(client: Client, message: Message):
-    # Get active fsub channels from DB
-    from database.database import get_fsub_channels, get_fake_link, get_fsub_request_mode
+    from database.database import get_fake_link, get_fsub_channel_name
     fsubs = await get_fsub_channels()
 
     if not fsubs:
@@ -164,7 +192,7 @@ async def not_joined(client: Client, message: Message):
     req_mode = await get_fsub_request_mode()
     buttons = []
 
-    # Fake link button — sabse pehle dikhao (same as link-sharing-bot logic)
+    # Fake link button — sabse pehle dikhao
     fake = await get_fake_link()
     if fake:
         buttons.append([InlineKeyboardButton(fake["button_text"], url=fake["url"])])
@@ -180,7 +208,12 @@ async def not_joined(client: Client, message: Message):
                 chat = await client.get_chat(ch_id)
                 url = chat.invite_link or await client.export_chat_invite_link(ch_id)
             chat = await client.get_chat(ch_id)
-            buttons.append([InlineKeyboardButton(f"📢 {chat.title}", url=url)])
+
+            # Custom name check — agar set hai toh wahi use karo
+            custom_name = await get_fsub_channel_name(ch_id)
+            btn_text = custom_name if custom_name else f"📢 {chat.title}"
+
+            buttons.append([InlineKeyboardButton(btn_text, url=url)])
         except Exception:
             pass
 
@@ -192,7 +225,12 @@ async def not_joined(client: Client, message: Message):
             )
         ])
     except IndexError:
-        pass
+        buttons.append([
+            InlineKeyboardButton(
+                "🔄 Try Again",
+                url=f"https://t.me/{client.username}?start=start"
+            )
+        ])
 
     await message.reply(
         text=FORCE_MSG.format(
