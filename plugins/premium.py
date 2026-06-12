@@ -22,6 +22,7 @@ PREMIUM PRIORITY (fast-path, no waiting):
 
 import datetime
 import logging
+from urllib.parse import quote
 
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -38,8 +39,16 @@ log = logging.getLogger(__name__)
 
 # ── Premium purchase contact ────────────────────────────────────────
 # Premium kharidne ke liye user is account ko message karega.
-PREMIUM_CONTACT_USERNAME = "Sbanime_Premium_robot"
+# "Buy This Plan" pe click karte hi plan ka naam/duration/price prefilled
+# message ke saath is account ko bhej diya jaata hai.
+PREMIUM_CONTACT_USERNAME = "Cineplexpremium"
 PREMIUM_CONTACT_URL = f"https://t.me/{PREMIUM_CONTACT_USERNAME}"
+
+
+def _buy_url(text: str) -> str:
+    """t.me deep link with a prefilled message to the premium contact."""
+    return f"{PREMIUM_CONTACT_URL}?text={quote(text)}"
+
 
 # ── Plans data ────────────────────────────────────────────────────
 PLANS = {
@@ -47,6 +56,7 @@ PLANS = {
         "emoji": "🥉",
         "name": "Bronze Plan",
         "duration": "7 Days",
+        "days": 7,
         "price": "₹10",
         "prev": "other",
         "next": "silver",
@@ -55,6 +65,7 @@ PLANS = {
         "emoji": "🥈",
         "name": "Silver Plan",
         "duration": "15 Days",
+        "days": 15,
         "price": "₹20",
         "prev": "bronze",
         "next": "gold",
@@ -63,6 +74,7 @@ PLANS = {
         "emoji": "🥇",
         "name": "Gold Plan",
         "duration": "30 Days",
+        "days": 30,
         "price": "₹40",
         "prev": "silver",
         "next": "platinum",
@@ -71,6 +83,7 @@ PLANS = {
         "emoji": "🏅",
         "name": "Platinum Plan",
         "duration": "45 Days",
+        "days": 45,
         "price": "₹55",
         "prev": "gold",
         "next": "diamond",
@@ -79,6 +92,7 @@ PLANS = {
         "emoji": "💎",
         "name": "Diamond Plan",
         "duration": "60 Days",
+        "days": 60,
         "price": "₹75",
         "prev": "platinum",
         "next": "other",
@@ -87,11 +101,25 @@ PLANS = {
         "emoji": "🎁",
         "name": "Other / Custom Plan",
         "duration": "Customised Days",
+        "days": None,
         "price": "According to days you choose",
         "prev": "diamond",
         "next": "bronze",
     },
 }
+
+
+# ── Plan auto-detect (for /addpremium) ──────────────────────────────
+
+def _match_plan(seconds: int) -> str | None:
+    """Duration (seconds) ko PLANS ke 'days' se match karo. No match → None (custom)."""
+    days = seconds / 86400
+    for key, p in PLANS.items():
+        if p["days"] is not None and abs(days - p["days"]) < 0.01:
+            return key
+    return None
+
+
 
 
 # ── Time-left formatter ────────────────────────────────────────────
@@ -174,10 +202,20 @@ async def cmd_add_premium(client: Bot, message: Message):
     expiry_text = _expiry_str(expiry) if expiry else "N/A"
     duration_text = _duration_str(seconds)
 
+    # ── Auto-detect plan from duration ────────────────────────────
+    plan_key = _match_plan(seconds)
+    if plan_key:
+        plan_label = PLANS[plan_key]["name"]
+        plan_line  = f"📦 Plan: <b>{plan_label}</b>\n"
+    else:
+        plan_label = "Custom Plan"
+        plan_line  = f"📦 Plan: <b>{plan_label}</b> (custom duration)\n"
+
     await message.reply(
         f"✅ <b>Premium Added Successfully!</b>\n\n"
         f"👤 User: {mention}\n"
         f"🆔 User ID: <code>{user_id}</code>\n"
+        f"{plan_line}"
         f"⏰ Duration: <b>{duration_text}</b>\n"
         f"⌛ Expiry: <b>{expiry_text}</b>\n\n"
         f"🚀 <i>FSub aur Link Shortener — dono bypass, fast priority!</i>"
@@ -189,7 +227,7 @@ async def cmd_add_premium(client: Bot, message: Message):
             chat_id=user_id,
             text=(
                 f"🎉 <b>Congratulations!</b>\n\n"
-                f"Aapko <b>Premium Membership</b> mil gayi hai!\n\n"
+                f"Aapka <b>{plan_label}</b> successfully activate ho gaya hai! ✅\n\n"
                 f"⏰ Duration: <b>{duration_text}</b>\n"
                 f"⌛ Expiry: <b>{expiry_text}</b>\n\n"
                 f"<blockquote>"
@@ -213,6 +251,7 @@ async def cmd_add_premium(client: Bot, message: Message):
                     f"#PremiumAdded\n\n"
                     f"👤 User: {mention}\n"
                     f"🆔 User ID: <code>{user_id}</code>\n"
+                    f"{plan_line}"
                     f"⏰ Duration: <b>{duration_text}</b>\n"
                     f"⌛ Expiry: <b>{expiry_text}</b>\n"
                     f"👮 By: {message.from_user.mention}"
@@ -372,7 +411,7 @@ async def cmd_myplan(client: Bot, message: Message):
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("⚜️ View Plans", callback_data="plan_menu"),
             ], [
-                InlineKeyboardButton("💸 Contact To Buy", url=PREMIUM_CONTACT_URL),
+                InlineKeyboardButton("💸 Contact To Buy", url=_buy_url("Hi, I'm interested in Premium Fast Download")),
             ]])
         )
 
@@ -417,7 +456,7 @@ def _main_plan_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"{PLANS['other']['emoji']} Other", callback_data="plan_other"),
         ],
         [
-            InlineKeyboardButton("💸 Contact To Buy Premium", url=PREMIUM_CONTACT_URL),
+            InlineKeyboardButton("💸 Contact To Buy Premium", url=_buy_url("Hi, I'm interested in Premium Fast Download")),
         ],
         [
             InlineKeyboardButton("❌ Close", callback_data="plan_close"),
@@ -449,8 +488,12 @@ def _plan_detail_text(key: str, mention: str) -> str:
 
 def _plan_detail_menu(key: str) -> InlineKeyboardMarkup:
     p = PLANS[key]
+    if key == "other":
+        buy_text = "Hi, I'm interested in a Custom Premium Plan - Fast Download"
+    else:
+        buy_text = f"Hi, I'm interested in Premium {p['name']} ({p['duration']} - {p['price']}) - Fast Download"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💸 Buy This Plan", url=PREMIUM_CONTACT_URL)],
+        [InlineKeyboardButton("💸 Buy This Plan", url=_buy_url(buy_text))],
         [
             InlineKeyboardButton("⋞ Back", callback_data=f"plan_{p['prev']}"),
             InlineKeyboardButton("📋 All Plans", callback_data="plan_menu"),
