@@ -424,3 +424,90 @@ async def ftl_batch_clear(channel_id: int) -> bool:
     except Exception as e:
         logging.error(f"ftl_batch_clear error: {e}")
         return False
+
+# ── Free Trial ─────────────────────────────────────────────────────
+free_trial_col = database["free_trial_used"]
+
+async def has_used_free_trial(user_id: int) -> bool:
+    """Check if user ne already free trial use kiya hai."""
+    try:
+        return bool(await free_trial_col.find_one({"_id": user_id}))
+    except Exception as e:
+        logging.error(f"has_used_free_trial error: {e}")
+        return False
+
+async def mark_free_trial_used(user_id: int) -> bool:
+    """User ko free trial used mark karo."""
+    try:
+        await free_trial_col.update_one(
+            {"_id": user_id},
+            {"$set": {"_id": user_id}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logging.error(f"mark_free_trial_used error: {e}")
+        return False
+
+# ── Referral System ────────────────────────────────────────────────
+referral_col      = database["referrals"]      # tracks who referred whom
+referral_done_col = database["referral_done"]  # users jo already refer ke through aaye
+
+async def add_referral_day(referrer_id: int) -> int:
+    """
+    Referrer ko 1 din ka premium add karo (ya extend karo).
+    Returns: new total days added (just informational).
+    """
+    try:
+        # Current expiry fetch karo
+        doc = await premium_col.find_one({"_id": referrer_id})
+        now = datetime.datetime.now()
+        if doc and doc.get("expiry_time") and doc["expiry_time"] > now:
+            new_expiry = doc["expiry_time"] + datetime.timedelta(days=1)
+        else:
+            new_expiry = now + datetime.timedelta(days=1)
+
+        await premium_col.update_one(
+            {"_id": referrer_id},
+            {"$set": {"expiry_time": new_expiry}},
+            upsert=True
+        )
+        # referral count track karo
+        await referral_col.update_one(
+            {"_id": referrer_id},
+            {"$inc": {"count": 1}},
+            upsert=True
+        )
+        doc2 = await referral_col.find_one({"_id": referrer_id})
+        return doc2.get("count", 1) if doc2 else 1
+    except Exception as e:
+        logging.error(f"add_referral_day error: {e}")
+        return 0
+
+async def is_referred_user(user_id: int) -> bool:
+    """Check karo ki yeh user already kisi ke refer se aaya tha."""
+    try:
+        return bool(await referral_done_col.find_one({"_id": user_id}))
+    except Exception:
+        return False
+
+async def mark_referred_user(user_id: int, referrer_id: int) -> bool:
+    """User ko referred mark karo."""
+    try:
+        await referral_done_col.update_one(
+            {"_id": user_id},
+            {"$set": {"referrer_id": referrer_id}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logging.error(f"mark_referred_user error: {e}")
+        return False
+
+async def get_referral_count(user_id: int) -> int:
+    """User ne kitne log refer kiye."""
+    try:
+        doc = await referral_col.find_one({"_id": user_id})
+        return doc.get("count", 0) if doc else 0
+    except Exception:
+        return 0
