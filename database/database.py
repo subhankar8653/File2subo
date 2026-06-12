@@ -59,6 +59,8 @@ async def unban_user(user_id: int):
     await banned_col.delete_one({"_id": user_id})
 
 # ── Force Sub ─────────────────────────────────────────────────────
+# Document structure: { _id: channel_id, custom_name: "..." }
+# custom_name optional — agar set nahi hai toh channel ka actual title use hoga
 
 async def add_fsub(channel_id: int):
     if not await fsub_col.find_one({"_id": channel_id}):
@@ -69,6 +71,58 @@ async def remove_fsub(channel_id: int):
 
 async def get_fsub_channels() -> list:
     return [doc["_id"] async for doc in fsub_col.find()]
+
+async def get_fsub_channel_name(channel_id: int) -> str | None:
+    """Custom button name fetch karo. None return hoga agar set nahi."""
+    doc = await fsub_col.find_one({"_id": channel_id})
+    if doc:
+        return doc.get("custom_name") or None
+    return None
+
+async def set_fsub_channel_name(channel_id: int, custom_name: str) -> bool:
+    """FSub channel ka custom button name set karo."""
+    try:
+        result = await fsub_col.update_one(
+            {"_id": channel_id},
+            {"$set": {"custom_name": custom_name.strip()}},
+            upsert=False
+        )
+        return result.matched_count > 0
+    except Exception as e:
+        import logging; logging.error(f"set_fsub_channel_name error: {e}")
+        return False
+
+async def clear_fsub_channel_name(channel_id: int):
+    """Custom name hata do — wapas actual channel title use hoga."""
+    await fsub_col.update_one({"_id": channel_id}, {"$unset": {"custom_name": ""}})
+
+# ── Pending FSub Requests (Request Mode) ─────────────────────────
+# Jab user join request bhejta hai, uska record yahan save hoga.
+# Jab request approve ho jaaye, record hata denge.
+
+fsub_requests_col = database["fsub_pending_requests"]
+
+async def add_fsub_request(channel_id: int, user_id: int):
+    """User ki pending join request record karo."""
+    doc_id = f"{channel_id}_{user_id}"
+    if not await fsub_requests_col.find_one({"_id": doc_id}):
+        await fsub_requests_col.insert_one({
+            "_id": doc_id,
+            "channel_id": channel_id,
+            "user_id": user_id,
+        })
+
+async def has_fsub_request(channel_id: int, user_id: int) -> bool:
+    """Check karo ki user ne is channel ke liye join request bheja hai ya nahi."""
+    doc_id = f"{channel_id}_{user_id}"
+    return bool(await fsub_requests_col.find_one({"_id": doc_id}))
+
+async def remove_fsub_request(channel_id: int, user_id: int):
+    """Approved/rejected request ka record hata do."""
+    doc_id = f"{channel_id}_{user_id}"
+    await fsub_requests_col.delete_one({"_id": doc_id})
+
+# ── Request Mode ──────────────────────────────────────────────────
 
 async def get_fsub_request_mode() -> bool:
     """Global request mode — agar True hai to FSub channels join-request link banayenge."""
