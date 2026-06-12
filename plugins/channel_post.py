@@ -14,7 +14,9 @@ from helper_func import encode
     filters.private & filters.user(ADMINS) &
     ~filters.command(["start", "users", "broadcast", "batch", "genlink", "stats",
                       "addadmin", "removeadmin", "ban", "unban", "addsub", "removesub", "protect",
-                      "settings", "cancel"])
+                      "settings", "cancel",
+                      "addpremium", "removepremium", "premiumusers", "premiuminfo",
+                      "myplan", "plan"])
 )
 async def channel_post(client: Client, message: Message):
     reply_text = await message.reply("⏳ Please wait...", quote=True)
