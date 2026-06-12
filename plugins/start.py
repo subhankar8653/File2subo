@@ -331,6 +331,11 @@ async def start_command(client: Client, message: Message):
 
 @Bot.on_message(filters.command("start") & filters.private)
 async def not_joined(client: Client, message: Message):
+    # ── reff_ link ke liye FSub skip karo ─────────────────────────
+    # User pehli baar aya hai refer link se — FSub block nahi hona chahiye
+    if len(message.command) > 1 and message.command[1].startswith("reff_"):
+        return await start_command(client, message)
+
     fsubs = await get_fsub_channels()
 
     if not fsubs:
