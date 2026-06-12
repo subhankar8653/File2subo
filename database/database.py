@@ -184,8 +184,11 @@ async def remove_fake_link_by_index(index: int) -> bool:
         if index < 1 or index > len(links):
             return False
         target = links[index - 1]
-        from bson import ObjectId
-        result = await fake_link_col.delete_one({"_id": ObjectId(target["id"])})
+        # ObjectId conversion avoid karo — url+button_text se directly delete
+        result = await fake_link_col.delete_one({
+            "url": target["url"],
+            "button_text": target["button_text"],
+        })
         return result.deleted_count > 0
     except Exception as e:
         logging.error(f"remove_fake_link_by_index error: {e}")
