@@ -8,7 +8,7 @@ from config import ADMINS, OWNER_ID
 from database.database import (
     get_setting, set_setting,
     add_fsub, remove_fsub, get_fsub_channels,
-    get_fake_link, set_fake_link, remove_fake_link,
+    get_fake_links, add_fake_link, remove_fake_link,
     get_fsub_request_mode, set_fsub_request_mode,
     get_fsub_channel_name, set_fsub_channel_name, clear_fsub_channel_name,
     get_shortener_settings, set_bot_config, get_bot_config,
@@ -27,7 +27,7 @@ async def settings_text_and_markup(client):
     start_pic = await get_setting("start_pic", "")
     start_msg = await get_setting("start_msg", "")
     req_mode  = await get_fsub_request_mode()
-    fake      = await get_fake_link()
+    fakes     = await get_fake_links()
 
     # Shortener status
     s = await get_shortener_settings()
@@ -58,7 +58,7 @@ async def settings_text_and_markup(client):
         f"📢 <b>Force Sub Channels:</b> {len(fsubs)}"
         + (fsub_list if fsubs else " (none)")
         + f"\n📩 <b>Request Mode:</b> {'✅ ON' if req_mode else '❌ OFF'}"
-        + f"\n🔗 <b>Fake Link:</b> {'✅ Set' if fake else '❌ Not set'}"
+        + f"\n🔗 <b>Fake Link:</b> {len(fakes)} set"
         + f"\n⚡ <b>Shortener:</b> {shn_status}"
         + f"\n📹 <b>Tutorials:</b> FSub {fsub_tut_status}  |  Shortener {shn_tut_status}"
     )
@@ -80,7 +80,7 @@ async def settings_text_and_markup(client):
         ],
         [
             InlineKeyboardButton(
-                f"🔗 Fake Link: {'✅ Set' if fake else '❌ Not set'}",
+                f"🔗 Fake Link: {len(fakes)} set",
                 callback_data="fakelink_menu"
             ),
             InlineKeyboardButton("📋 List FSub", callback_data="set_listsub"),
@@ -464,41 +464,47 @@ async def settings_cb(client, query: CallbackQuery):
 
     # ── Fake Link Menu ──────────────────────────────────────────
     if data == "fakelink_menu":
-        fake = await get_fake_link()
-        status = (
-            f"<b>Current:</b> <code>{fake['button_text']}</code> → <code>{fake['url']}</code>"
-            if fake else "<i>Koi fake link set nahi hai.</i>"
-        )
+        fakes = await get_fake_links()
+        if fakes:
+            lines = []
+            for i, f in enumerate(fakes, 1):
+                lines.append(f"{i}. <code>{f['button_text']}</code> → <code>{f['url']}</code> (row {f['row']})")
+            status = "\n".join(lines)
+        else:
+            status = "<i>Koi fake link set nahi hai.</i>"
         await query.message.edit_text(
-            f"🔗 <b>Fake Link Settings</b>\n\n{status}",
+            f"🔗 <b>Fake Link Settings</b>\n\n{status}\n\n"
+            "<i>Commands: /setfakelink, /deletefakelink, /listfakelink</i>",
             reply_markup=await fakelink_menu_markup(),
         )
         return await query.answer()
 
     # ── Fake Link View ──────────────────────────────────────────
     if data == "set_fakelink_view":
-        fake = await get_fake_link()
-        if fake:
-            return await query.answer(
-                f"Text: {fake['button_text']}\nURL: {fake['url']}",
-                show_alert=True,
+        fakes = await get_fake_links()
+        if fakes:
+            text = "\n".join(
+                f"{i}. {f['button_text']} → {f['url']} (row {f['row']})"
+                for i, f in enumerate(fakes, 1)
             )
+            return await query.answer(text, show_alert=True)
         return await query.answer("❌ Koi fake link set nahi hai!", show_alert=True)
 
-    # ── Fake Link Remove ────────────────────────────────────────
+    # ── Fake Link Remove (all) ───────────────────────────────────
     if data == "set_fakelink_remove":
         result = await remove_fake_link()
         await query.answer(
-            "✅ Fake link hata diya!" if result else "❌ Koi fake link set nahi tha.",
+            "✅ Sabhi fake links hata diye!" if result else "❌ Koi fake link set nahi tha.",
             show_alert=True,
         )
-        fake = await get_fake_link()
-        status = (
-            f"<b>Current:</b> <code>{fake['button_text']}</code> → <code>{fake['url']}</code>"
-            if fake else "<i>Koi fake link set nahi hai.</i>"
+        fakes = await get_fake_links()
+        status = "<i>Koi fake link set nahi hai.</i>" if not fakes else "\n".join(
+            f"{i}. <code>{f['button_text']}</code> → <code>{f['url']}</code> (row {f['row']})"
+            for i, f in enumerate(fakes, 1)
         )
         return await query.message.edit_text(
-            f"🔗 <b>Fake Link Settings</b>\n\n{status}",
+            f"🔗 <b>Fake Link Settings</b>\n\n{status}\n\n"
+            "<i>Commands: /setfakelink, /deletefakelink, /listfakelink</i>",
             reply_markup=await fakelink_menu_markup(),
         )
 
@@ -507,8 +513,8 @@ async def settings_cb(client, query: CallbackQuery):
         await query.answer()
         ask = await query.message.reply(
             "🔗 <b>Fake Link set karo</b>\n\n"
-            "Format: <code>URL Button Text</code>\n"
-            "Example: <code>https://t.me/mychannel Join Sponsor</code>\n\n"
+            "Format: <code>URL Button Text [Row]</code>\n"
+            "Example: <code>https://t.me/mychannel Join Sponsor 2</code>\n\n"
             "/cancel karo quit karne ke liye."
         )
         try:
@@ -526,15 +532,22 @@ async def settings_cb(client, query: CallbackQuery):
         parts = resp.text.strip().split(maxsplit=1)
         if len(parts) < 2:
             return await resp.reply("❌ Galat format! URL aur Button Text dono chahiye.")
-        url, btn_text = parts[0], parts[1]
+        url, rest = parts[0], parts[1]
+        row = 1
+        rest_parts = rest.rsplit(maxsplit=1)
+        if len(rest_parts) == 2 and rest_parts[1].isdigit():
+            btn_text, row = rest_parts[0], max(1, int(rest_parts[1]))
+        else:
+            btn_text = rest
         if not url.startswith(("http://", "https://", "t.me/")):
             return await resp.reply("❌ Valid URL dalo (http/https/t.me se shuru hona chahiye).")
-        success = await set_fake_link(url, btn_text)
+        success = await add_fake_link(url, btn_text, row)
         if success:
             await resp.reply(
-                f"✅ <b>Fake Link set!</b>\n\n"
+                f"✅ <b>Fake Link add!</b>\n\n"
                 f"<b>Button:</b> <code>{btn_text}</code>\n"
-                f"<b>URL:</b> <code>{url}</code>"
+                f"<b>URL:</b> <code>{url}</code>\n"
+                f"<b>Row:</b> <code>{row}</code>"
             )
         else:
             await resp.reply("❌ Error! Save nahi hua. Dobara try karo.")

@@ -8,9 +8,9 @@ Commands (Admin only):
   /removesub <channel_id>       — FSub channel hata do
   /listsub                      — Sabhi FSub channels dekho
 
-  /setfakelink <url> <text>     — Fake link button set karo (FSub message mein sabse pehle dikhta hai)
-  /removefakelink               — Fake link hata do
-  /viewfakelink                 — Current fake link dekho
+  /setfakelink <url> <text> [row]  — Fake link button add karo (row optional, default 1)
+  /deletefakelink <number>         — Fake link delete karo (/listfakelink se number lo)
+  /listfakelink                    — Sabhi fake links dekho
 """
 
 from pyrogram import filters
@@ -20,7 +20,7 @@ from bot import Bot
 from config import ADMINS
 from database.database import (
     add_fsub, remove_fsub, get_fsub_channels,
-    set_fake_link, get_fake_link, remove_fake_link,
+    add_fake_link, get_fake_links, remove_fake_link_by_index,
 )
 
 
@@ -115,12 +115,12 @@ async def cmd_listsub(client: Bot, message: Message):
 @Bot.on_message(filters.command("setfakelink") & filters.private & filters.user(ADMINS))
 async def cmd_setfakelink(client: Bot, message: Message):
     """
-    Usage: /setfakelink <url> <button_text>
-    Example: /setfakelink https://t.me/mychannel Join Mera Channel
+    Usage: /setfakelink <url> <button_text> [row]
+    Example: /setfakelink https://t.me/mychannel Join Mera Channel 2
 
-    Yeh button FSub message mein sabse pehle position pe dikhega.
-    Kaam: user ko ek fake/extra button dikhana jisko join karne ki zarurat nahi hoti —
-    lekin join button ki tarah lagta hai (ad channel, sponsor link, etc.)
+    Multiple fake links add kar sakte ho — purana delete nahi hoga.
+    Row batata hai ki button kaunsi position pe FSub message mein dikhega
+    (1 = sabse pehla, 2 = dusra, etc.)
     """
     parts = message.text.split(maxsplit=2)
 
@@ -128,14 +128,24 @@ async def cmd_setfakelink(client: Bot, message: Message):
         return await message.reply(
             "<b>❌ Galat format!</b>\n\n"
             "<b>Usage:</b>\n"
-            "<code>/setfakelink [URL] [Button Text]</code>\n\n"
+            "<code>/setfakelink [URL] [Button Text] [Row]</code>\n\n"
             "<b>Example:</b>\n"
-            "<code>/setfakelink https://t.me/mychannel Join Mera Channel</code>\n\n"
-            "<i>💡 Yeh button FSub message mein sabse pehle dikhega.</i>"
+            "<code>/setfakelink https://t.me/mychannel Join Mera Channel 2</code>\n\n"
+            "<i>💡 Row optional hai (default 1). Row 2 ka matlab — yeh button "
+            "FSub message mein 2nd position pe dikhega.</i>"
         )
 
-    url         = parts[1]
-    button_text = parts[2]
+    url  = parts[1]
+    rest = parts[2]
+
+    # Last word ko row number ke liye check karo (agar integer hai)
+    row = 1
+    rest_parts = rest.rsplit(maxsplit=1)
+    if len(rest_parts) == 2 and rest_parts[1].isdigit():
+        button_text = rest_parts[0]
+        row = max(1, int(rest_parts[1]))
+    else:
+        button_text = rest
 
     if not url.startswith(("http://", "https://", "t.me/")):
         return await message.reply(
@@ -143,52 +153,70 @@ async def cmd_setfakelink(client: Bot, message: Message):
             "URL <code>http://</code>, <code>https://</code> ya <code>t.me/</code> se shuru hona chahiye."
         )
 
-    success = await set_fake_link(url, button_text)
+    success = await add_fake_link(url, button_text, row)
 
     if success:
         await message.reply(
-            "✅ <b>Fake Link set ho gaya!</b>\n\n"
+            "✅ <b>Fake Link add ho gaya!</b>\n\n"
             f"<b>Button Text:</b> <code>{button_text}</code>\n"
-            f"<b>URL:</b> <code>{url}</code>\n\n"
-            "<i>Yeh button FSub message mein sabse pehle position pe dikhega.</i>"
+            f"<b>URL:</b> <code>{url}</code>\n"
+            f"<b>Row:</b> <code>{row}</code>\n\n"
+            "<i>Yeh button FSub message mein position</i> "
+            f"<i>{row} pe dikhega. List dekhne ke liye /listfakelink.</i>"
         )
     else:
         await message.reply("❌ <b>Error!</b> Fake link save nahi hua. Dobara try karo.")
 
 
-# ── /removefakelink ───────────────────────────────────────────────
+# ── /deletefakelink ───────────────────────────────────────────────
 
-@Bot.on_message(filters.command("removefakelink") & filters.private & filters.user(ADMINS))
-async def cmd_removefakelink(client: Bot, message: Message):
-    """Remove the currently set fake link."""
-    success = await remove_fake_link()
+@Bot.on_message(filters.command("deletefakelink") & filters.private & filters.user(ADMINS))
+async def cmd_deletefakelink(client: Bot, message: Message):
+    """
+    Usage: /deletefakelink <number>
+    Example: /deletefakelink 1
+
+    Number /listfakelink se lo.
+    """
+    if len(message.command) < 2 or not message.command[1].isdigit():
+        return await message.reply(
+            "<b>❌ Usage:</b> <code>/deletefakelink [number]</code>\n\n"
+            "Number dekhne ke liye <code>/listfakelink</code> use karo."
+        )
+
+    index = int(message.command[1])
+    success = await remove_fake_link_by_index(index)
 
     if success:
         await message.reply(
-            "✅ <b>Fake Link hata diya!</b>\n\n"
-            "<i>Ab FSub message mein fake link button nahi dikhega.</i>"
+            f"✅ <b>Fake Link #{index} hata diya!</b>\n\n"
+            "<i>Baki fake links jaise the waise hi hai.</i>"
         )
     else:
-        await message.reply("❌ <b>Koi fake link set nahi hai!</b>")
+        await message.reply(f"❌ <b>Fake Link #{index} nahi mila!</b>")
 
 
-# ── /viewfakelink ─────────────────────────────────────────────────
+# ── /listfakelink ─────────────────────────────────────────────────
 
-@Bot.on_message(filters.command("viewfakelink") & filters.private & filters.user(ADMINS))
-async def cmd_viewfakelink(client: Bot, message: Message):
-    """View the currently configured fake link."""
-    fake = await get_fake_link()
+@Bot.on_message(filters.command("listfakelink") & filters.private & filters.user(ADMINS))
+async def cmd_listfakelink(client: Bot, message: Message):
+    """View all configured fake links."""
+    fakes = await get_fake_links()
 
-    if fake:
-        await message.reply(
-            "📝 <b>Current Fake Link Settings:</b>\n\n"
-            f"<b>Button Text:</b> <code>{fake['button_text']}</code>\n"
-            f"<b>URL:</b> <code>{fake['url']}</code>\n\n"
-            "<i>Yeh button FSub message mein sabse pehle position pe dikhta hai.</i>"
-        )
-    else:
-        await message.reply(
+    if not fakes:
+        return await message.reply(
             "❌ <b>Koi fake link set nahi hai.</b>\n\n"
             "Set karne ke liye:\n"
-            "<code>/setfakelink https://t.me/channel Button Text</code>"
+            "<code>/setfakelink https://t.me/channel Button Text [row]</code>"
         )
+
+    lines = ["📝 <b>Fake Links:</b>\n"]
+    for i, fake in enumerate(fakes, 1):
+        lines.append(
+            f"<b>{i}.</b> <code>{fake['button_text']}</code>\n"
+            f"   🔗 <code>{fake['url']}</code>\n"
+            f"   📍 Row: <code>{fake['row']}</code>"
+        )
+
+    lines.append("\n<i>Delete karne ke liye: /deletefakelink (number)</i>")
+    await message.reply("\n\n".join(lines))

@@ -17,7 +17,7 @@ from database.database import (
     get_setting,
     get_fsub_channels, get_fsub_request_mode,
     add_fsub_request, remove_fsub_request, has_fsub_request,
-    get_fake_link, get_fsub_channel_name,
+    get_fake_links, get_fsub_channel_name,
     get_shortener_settings, get_bot_config,
     has_premium_access,
     create_verify_token, get_verify_token, mark_token_used,
@@ -344,10 +344,6 @@ async def not_joined(client: Client, message: Message):
     req_mode = await get_fsub_request_mode()
     buttons  = []
 
-    fake = await get_fake_link()
-    if fake:
-        buttons.append([InlineKeyboardButton(fake["button_text"], url=fake["url"])])
-
     for ch_id in fsubs:
         try:
             if req_mode:
@@ -364,6 +360,11 @@ async def not_joined(client: Client, message: Message):
             buttons.append([InlineKeyboardButton(btn_text, url=url)])
         except Exception:
             pass
+
+    fake_links = await get_fake_links()
+    for fake in fake_links:
+        pos = max(0, min(int(fake.get("row", 1)) - 1, len(buttons)))
+        buttons.insert(pos, [InlineKeyboardButton(fake["button_text"], url=fake["url"])])
 
     try:
         buttons.append([InlineKeyboardButton(
