@@ -22,7 +22,7 @@ FORCE_MSG         = os.environ.get("FORCE_SUB_MESSAGE", "Hello {first}!\n\n<b>Pl
 CUSTOM_CAPTION    = os.environ.get("CUSTOM_CAPTION", None)
 PROTECT_CONTENT   = os.environ.get("PROTECT_CONTENT", "False") == "True"
 AUTO_DELETE_TIME  = int(os.environ.get("AUTO_DELETE_TIME", "0"))
-AUTO_DELETE_MSG   = os.environ.get("AUTO_DELETE_MSG", "⚠️ This file will be deleted in <b>{time} seconds</b>. Save it before that!")
+AUTO_DELETE_MSG   = os.environ.get("AUTO_DELETE_MSG", "⚠️ This file will be deleted in <b>{time}</b>. Save it before that!")
 AUTO_DEL_SUCCESS_MSG = os.environ.get("AUTO_DEL_SUCCESS_MSG", "✅ Your file has been deleted. Thank you for using our service.")
 DISABLE_CHANNEL_BUTTON = os.environ.get("DISABLE_CHANNEL_BUTTON", "False") == "True"
 BOT_STATS_TEXT    = "<b>BOT UPTIME</b>\n{uptime}"
