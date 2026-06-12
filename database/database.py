@@ -134,33 +134,67 @@ async def get_setting(key: str, default=None):
 async def set_setting(key: str, value):
     await settings_col.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
 
-# ── Fake Link ─────────────────────────────────────────────────────
+# ── Fake Link (multi) ────────────────────────────────────────────
+# Each doc: {_id: ObjectId, url, button_text, row, order}
 
-async def set_fake_link(url: str, button_text: str) -> bool:
+async def add_fake_link(url: str, button_text: str, row: int = 1) -> bool:
     try:
-        await fake_link_col.update_one(
-            {"_id": "config"},
-            {"$set": {"url": url, "button_text": button_text, "enabled": True}},
-            upsert=True,
-        )
+        last = await fake_link_col.find_one(sort=[("order", -1)])
+        order = (last["order"] + 1) if last else 1
+        await fake_link_col.insert_one({
+            "url": url,
+            "button_text": button_text,
+            "row": row,
+            "order": order,
+        })
         return True
     except Exception as e:
-        logging.error(f"set_fake_link error: {e}")
+        logging.error(f"add_fake_link error: {e}")
         return False
 
-async def get_fake_link() -> dict | None:
+# Backwards-compatible alias
+async def set_fake_link(url: str, button_text: str, row: int = 1) -> bool:
+    return await add_fake_link(url, button_text, row)
+
+async def get_fake_links() -> list[dict]:
     try:
-        doc = await fake_link_col.find_one({"_id": "config"})
-        if doc and doc.get("enabled"):
-            return {"url": doc["url"], "button_text": doc["button_text"]}
-        return None
+        cursor = fake_link_col.find().sort("order", 1)
+        links = []
+        async for doc in cursor:
+            links.append({
+                "id": str(doc["_id"]),
+                "url": doc["url"],
+                "button_text": doc["button_text"],
+                "row": doc.get("row", 1),
+            })
+        return links
     except Exception as e:
-        logging.error(f"get_fake_link error: {e}")
-        return None
+        logging.error(f"get_fake_links error: {e}")
+        return []
+
+async def get_fake_link() -> dict | None:
+    """Backwards-compatible: returns the first fake link, if any."""
+    links = await get_fake_links()
+    return links[0] if links else None
+
+async def remove_fake_link_by_index(index: int) -> bool:
+    """index is 1-based, as shown in /listfakelink."""
+    try:
+        links = await get_fake_links()
+        if index < 1 or index > len(links):
+            return False
+        target = links[index - 1]
+        from bson import ObjectId
+        result = await fake_link_col.delete_one({"_id": ObjectId(target["id"])})
+        return result.deleted_count > 0
+    except Exception as e:
+        logging.error(f"remove_fake_link_by_index error: {e}")
+        return False
 
 async def remove_fake_link() -> bool:
+    """Backwards-compatible: removes ALL fake links."""
     try:
-        result = await fake_link_col.delete_one({"_id": "config"})
+        result = await fake_link_col.delete_many({})
         return result.deleted_count > 0
     except Exception as e:
         logging.error(f"remove_fake_link error: {e}")
