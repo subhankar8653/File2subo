@@ -3,3 +3,4 @@ TgCrypto
 pyromod
 motor
 aiohttp
+shortzy
