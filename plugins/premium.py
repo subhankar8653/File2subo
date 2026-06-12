@@ -24,7 +24,7 @@ import datetime
 import logging
 
 from pyrogram import filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from bot import Bot
 from config import ADMINS, LOG_CHANNEL
@@ -35,6 +35,63 @@ from database.database import (
 )
 
 log = logging.getLogger(__name__)
+
+# ── Premium purchase contact ────────────────────────────────────────
+# Premium kharidne ke liye user is account ko message karega.
+PREMIUM_CONTACT_USERNAME = "Sbanime_Premium_robot"
+PREMIUM_CONTACT_URL = f"https://t.me/{PREMIUM_CONTACT_USERNAME}"
+
+# ── Plans data ────────────────────────────────────────────────────
+PLANS = {
+    "bronze": {
+        "emoji": "🥉",
+        "name": "Bronze Plan",
+        "duration": "7 Days",
+        "price": "₹10",
+        "prev": "other",
+        "next": "silver",
+    },
+    "silver": {
+        "emoji": "🥈",
+        "name": "Silver Plan",
+        "duration": "15 Days",
+        "price": "₹20",
+        "prev": "bronze",
+        "next": "gold",
+    },
+    "gold": {
+        "emoji": "🥇",
+        "name": "Gold Plan",
+        "duration": "30 Days",
+        "price": "₹40",
+        "prev": "silver",
+        "next": "platinum",
+    },
+    "platinum": {
+        "emoji": "🏅",
+        "name": "Platinum Plan",
+        "duration": "45 Days",
+        "price": "₹55",
+        "prev": "gold",
+        "next": "diamond",
+    },
+    "diamond": {
+        "emoji": "💎",
+        "name": "Diamond Plan",
+        "duration": "60 Days",
+        "price": "₹75",
+        "prev": "platinum",
+        "next": "other",
+    },
+    "other": {
+        "emoji": "🎁",
+        "name": "Other / Custom Plan",
+        "duration": "Customised Days",
+        "price": "According to days you choose",
+        "prev": "diamond",
+        "next": "bronze",
+    },
+}
 
 
 # ── Time-left formatter ────────────────────────────────────────────
@@ -311,22 +368,125 @@ async def cmd_myplan(client: Bot, message: Message):
         await message.reply(
             f"ℹ️ <b>{message.from_user.mention}</b>,\n\n"
             f"<blockquote>Aapke paas koi active premium plan nahi hai.\n\n"
-            f"Premium lene ke liye admin se contact karo.</blockquote>\n\n"
-            f"Use /plan for more info."
+            f"Premium lene ke liye neeche button par click karo.</blockquote>",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⚜️ View Plans", callback_data="plan_menu"),
+            ], [
+                InlineKeyboardButton("💸 Contact To Buy", url=PREMIUM_CONTACT_URL),
+            ]])
         )
 
 
-# ── /plan ─────────────────────────────────────────────────────────
+# ── /plan — Main premium plans menu ─────────────────────────────────
 
 @Bot.on_message(filters.command("plan") & filters.private)
 async def cmd_plan(client: Bot, message: Message):
     await message.reply(
-        f"⚜️ <b>Premium Membership Benefits</b>\n\n"
-        f"<blockquote>"
-        f"🚀 No Force Subscribe — koi channel join karne ki zaroorat nahi\n"
-        f"🔗 No Link Shortener / Ads — direct file access\n"
-        f"⚡ Fast Priority — sabse tez delivery"
-        f"</blockquote>\n\n"
-        f"📩 Premium lene ke liye admin se contact karo.\n\n"
-        f"Apna status check karo: /myplan"
+        _premium_overview_text(message.from_user.mention),
+        reply_markup=_main_plan_menu(),
+        disable_web_page_preview=True,
     )
+
+
+def _premium_overview_text(mention: str) -> str:
+    return (
+        f"👋 <b>Hey {mention},</b>\n\n"
+        f"<blockquote>🎁 <b>Premium Feature Benefits:</b></blockquote>\n\n"
+        f"✅ No need to open links / no FSub\n"
+        f"✅ Get direct files — fast priority\n"
+        f"✅ Ad-free experience (no link shortener)\n"
+        f"✅ High-speed download links\n"
+        f"✅ Full admin support\n\n"
+        f"📌 Select a plan below to see price & duration.\n"
+        f"📌 Check your active plan: /myplan"
+    )
+
+
+def _main_plan_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"{PLANS['bronze']['emoji']} Bronze", callback_data="plan_bronze"),
+            InlineKeyboardButton(f"{PLANS['silver']['emoji']} Silver", callback_data="plan_silver"),
+        ],
+        [
+            InlineKeyboardButton(f"{PLANS['gold']['emoji']} Gold", callback_data="plan_gold"),
+            InlineKeyboardButton(f"{PLANS['platinum']['emoji']} Platinum", callback_data="plan_platinum"),
+        ],
+        [
+            InlineKeyboardButton(f"{PLANS['diamond']['emoji']} Diamond", callback_data="plan_diamond"),
+            InlineKeyboardButton(f"{PLANS['other']['emoji']} Other", callback_data="plan_other"),
+        ],
+        [
+            InlineKeyboardButton("💸 Contact To Buy Premium", url=PREMIUM_CONTACT_URL),
+        ],
+        [
+            InlineKeyboardButton("❌ Close", callback_data="plan_close"),
+        ],
+    ])
+
+
+def _plan_detail_text(key: str, mention: str) -> str:
+    p = PLANS[key]
+    if key == "other":
+        return (
+            f"👋 <b>Hey {mention},</b>\n\n"
+            f"{p['emoji']} <u><b>{p['name']}</b></u>\n"
+            f"⏰ Duration: <b>{p['duration']}</b>\n"
+            f"💸 Price: <b>{p['price']}</b>\n\n"
+            f"🏆 Want a custom plan apart from the above? Message the contact below directly.\n\n"
+            f"📌 Use /plan to see all plans again.\n"
+            f"📌 Check your active plan: /myplan"
+        )
+    return (
+        f"👋 <b>Hey {mention},</b>\n\n"
+        f"{p['emoji']} <u><b>{p['name']}</b></u>\n"
+        f"⏰ Duration: <b>{p['duration']}</b>\n"
+        f"💸 Price: <b>{p['price']}</b>\n\n"
+        f"📌 Use /plan to see all plans again.\n"
+        f"📌 Check your active plan: /myplan"
+    )
+
+
+def _plan_detail_menu(key: str) -> InlineKeyboardMarkup:
+    p = PLANS[key]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💸 Buy This Plan", url=PREMIUM_CONTACT_URL)],
+        [
+            InlineKeyboardButton("⋞ Back", callback_data=f"plan_{p['prev']}"),
+            InlineKeyboardButton("📋 All Plans", callback_data="plan_menu"),
+            InlineKeyboardButton("Next ⋟", callback_data=f"plan_{p['next']}"),
+        ],
+    ])
+
+
+# ── Plan callbacks ───────────────────────────────────────────────
+
+@Bot.on_callback_query(filters.regex(r"^plan_(bronze|silver|gold|platinum|diamond|other)$"))
+async def cb_plan_detail(client: Bot, query: CallbackQuery):
+    key = query.data.split("_", 1)[1]
+    await query.message.edit_text(
+        _plan_detail_text(key, query.from_user.mention),
+        reply_markup=_plan_detail_menu(key),
+        disable_web_page_preview=True,
+    )
+    await query.answer()
+
+
+@Bot.on_callback_query(filters.regex("^plan_menu$"))
+async def cb_plan_menu(client: Bot, query: CallbackQuery):
+    await query.message.edit_text(
+        _premium_overview_text(query.from_user.mention),
+        reply_markup=_main_plan_menu(),
+        disable_web_page_preview=True,
+    )
+    await query.answer()
+
+
+@Bot.on_callback_query(filters.regex("^plan_close$"))
+async def cb_plan_close(client: Bot, query: CallbackQuery):
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    await query.answer()
+
