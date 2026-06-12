@@ -21,6 +21,7 @@ from database.database import (
     get_shortener_settings, get_bot_config,
     has_premium_access,
     create_verify_token, get_verify_token, mark_token_used,
+    add_referral_day, is_referred_user, mark_referred_user,
 )
 
 
@@ -124,6 +125,46 @@ async def start_command(client: Client, message: Message):
 
         if param.startswith("vfy_"):
             return await _handle_verify_token(client, message, user_id, param[4:])
+
+        # ── Referral deep link ─────────────────────────────────────
+        if param.startswith("reff_"):
+            try:
+                referrer_id = int(param.split("_", 1)[1])
+            except (ValueError, IndexError):
+                referrer_id = None
+
+            if referrer_id and referrer_id != user_id:
+                # Already referred?
+                if not await is_referred_user(user_id):
+                    await mark_referred_user(user_id, referrer_id)
+                    total_days = await add_referral_day(referrer_id)
+                    # Notify referrer
+                    try:
+                        from database.database import get_premium_expiry
+                        expiry = await get_premium_expiry(referrer_id)
+                        expiry_str = expiry.strftime("%d-%m-%Y %I:%M %p") if expiry else "N/A"
+                        await client.send_message(
+                            chat_id=referrer_id,
+                            text=(
+                                f"🎉 <b>Ek naya friend join kiya!</b>\n\n"
+                                f"👤 {message.from_user.mention} ne aapka link use kiya.\n"
+                                f"➕ <b>+1 Day</b> premium add ho gaya!\n"
+                                f"📊 Total refers: <b>{total_days}</b>\n"
+                                f"⌛ New Expiry: <b>{expiry_str}</b>"
+                            )
+                        )
+                    except Exception:
+                        pass
+                    # Notify new user
+                    await message.reply(
+                        f"✅ Aap <b>{(await client.get_users(referrer_id)).mention}</b> ke referral se aaye ho!\n"
+                        f"Dono ko benefit milega — refer karo aur earn karo: /plan"
+                    )
+                else:
+                    await message.reply("ℹ️ Aap pehle se ek referral link se aaye ho.")
+            elif referrer_id == user_id:
+                await message.reply("😅 Apna khud ka link use nahi kar sakte!")
+            return
 
         # ── Normal deep link — file delivery ──────────────────────
         try:

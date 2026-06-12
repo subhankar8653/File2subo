@@ -20,6 +20,7 @@ PREMIUM PRIORITY (fast-path, no waiting):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
+import asyncio
 import datetime
 import logging
 from urllib.parse import quote
@@ -33,6 +34,8 @@ from helper_func import parse_duration
 from database.database import (
     has_premium_access, get_premium_expiry,
     add_premium, remove_premium, get_all_premium_users,
+    has_used_free_trial, mark_free_trial_used,
+    get_referral_count,
 )
 
 log = logging.getLogger(__name__)
@@ -464,6 +467,10 @@ def _premium_overview_text(mention: str) -> str:
 def _main_plan_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("🆓 Free Trial (1 Day)", callback_data="plan_free"),
+            InlineKeyboardButton("👥 Refer & Earn", callback_data="plan_refer"),
+        ],
+        [
             InlineKeyboardButton(f"{PLANS['bronze']['emoji']} Bronze", callback_data="plan_bronze"),
             InlineKeyboardButton(f"{PLANS['silver']['emoji']} Silver", callback_data="plan_silver"),
         ],
@@ -553,3 +560,165 @@ async def cb_plan_close(client: Bot, query: CallbackQuery):
         pass
     await query.answer()
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# FREE TRIAL callback
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Bot.on_callback_query(filters.regex("^plan_free$"))
+async def cb_plan_free(client: Bot, query: CallbackQuery):
+    user_id = query.from_user.id
+
+    # Already premium?
+    if await has_premium_access(user_id):
+        expiry = await get_premium_expiry(user_id)
+        await query.answer(
+            f"⚠️ Aapke paas already active premium hai! Expiry: {_expiry_str(expiry)}",
+            show_alert=True
+        )
+        return
+
+    # Already used free trial?
+    if await has_used_free_trial(user_id):
+        await query.answer(
+            "❌ Aap pehle hi Free Trial use kar chuke ho!\n"
+            "Dobara nahi milega. Paid plan lo ya refer karke earn karo.",
+            show_alert=True
+        )
+        return
+
+    # Grant 1 day free trial
+    ok = await add_premium(user_id, 86400)  # 1 day = 86400 seconds
+    if not ok:
+        await query.answer("❌ Kuch error aaya. Try again.", show_alert=True)
+        return
+
+    await mark_free_trial_used(user_id)
+    expiry = await get_premium_expiry(user_id)
+
+    await query.message.edit_text(
+        f"🎉 <b>Free Trial Activated!</b>\n\n"
+        f"👤 User: {query.from_user.mention}\n"
+        f"⏰ Duration: <b>1 Day</b>\n"
+        f"⌛ Expiry: <b>{_expiry_str(expiry)}</b>\n\n"
+        f"<blockquote>"
+        f"✅ No FSub · No Shortener · Direct & Fast!\n\n"
+        f"📌 Trial khatam hone se pehle plan lo — /plan\n"
+        f"📌 Ya refer karke aur din earn karo!"
+        f"</blockquote>",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📋 View Plans", callback_data="plan_menu"),
+            InlineKeyboardButton("👥 Refer & Earn", callback_data="plan_refer"),
+        ]])
+    )
+    await query.answer("🎉 Free Trial activated!", show_alert=False)
+
+    # Log to LOG_CHANNEL
+    if LOG_CHANNEL:
+        try:
+            await client.send_message(
+                chat_id=LOG_CHANNEL,
+                text=(
+                    f"#FreeTrial\n\n"
+                    f"👤 User: {query.from_user.mention}\n"
+                    f"🆔 User ID: <code>{user_id}</code>\n"
+                    f"⌛ Expiry: <b>{_expiry_str(expiry)}</b>"
+                )
+            )
+        except Exception:
+            pass
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# REFER & EARN callback — shows referral link & stats
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Bot.on_callback_query(filters.regex("^plan_refer$"))
+async def cb_plan_refer(client: Bot, query: CallbackQuery):
+    user_id = query.from_user.id
+    me = await client.get_me()
+    bot_username = me.username
+
+    refer_link = f"https://t.me/{bot_username}?start=reff_{user_id}"
+    count = await get_referral_count(user_id)
+
+    await query.message.edit_text(
+        f"👥 <b>Refer & Earn Premium!</b>\n\n"
+        f"<blockquote>"
+        f"🔗 Apna referral link share karo:\n"
+        f"<code>{refer_link}</code>\n\n"
+        f"• 1 friend refer = <b>+1 Day Premium</b>\n"
+        f"• Jitna zyada refer, utne din ka premium!\n"
+        f"• Agar tumhare paas already premium hai toh refer karne pe time extend hoga"
+        f"</blockquote>\n\n"
+        f"📊 <b>Tumhara Referral Count:</b> <code>{count}</code> refers\n"
+        f"🏆 <b>Total Earned:</b> <code>{count} Days</code>",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Share Referral Link", url=f"https://t.me/share/url?url={refer_link}&text=Yeh%20bot%20use%20karo%20aur%20free%20premium%20pao!")],
+            [InlineKeyboardButton("⬅️ Back to Plans", callback_data="plan_menu")],
+        ]),
+        disable_web_page_preview=True,
+    )
+    await query.answer()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EXPIRY REMINDER — background task
+# Har 1 ghante mein check: agar kisi ka premium 24h mein khatam hoga
+# toh usse message bhejo
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_reminded_users: set = set()   # session mein ek baar hi remind karo
+
+async def expiry_reminder_task(client: Bot):
+    """Background loop — every hour premium expiry check karo."""
+    await asyncio.sleep(60)  # startup wait
+    while True:
+        try:
+            users = await get_all_premium_users()
+            now = datetime.datetime.now()
+            for doc in users:
+                uid = doc.get("_id")
+                expiry = doc.get("expiry_time")
+                if not uid or not expiry:
+                    continue
+
+                # Only remind if > 1 day plan original (expiry - now > 0 and <= 25h)
+                time_left = expiry - now
+                hours_left = time_left.total_seconds() / 3600
+
+                if 0 < hours_left <= 24 and uid not in _reminded_users:
+                    _reminded_users.add(uid)
+                    try:
+                        await client.send_message(
+                            chat_id=uid,
+                            text=(
+                                f"⚠️ <b>Aapka Premium Khatam Hone Wala Hai!</b>\n\n"
+                                f"⏳ Time Left: <b>{_time_left_str(expiry)}</b>\n"
+                                f"⌛ Expiry: <b>{_expiry_str(expiry)}</b>\n\n"
+                                f"<blockquote>"
+                                f"Jaldi se renew kar lo taaki service uninterrupted rahe!\n"
+                                f"Refer karke free din bhi earn kar sakte ho 👇"
+                                f"</blockquote>"
+                            ),
+                            reply_markup=InlineKeyboardMarkup([[
+                                InlineKeyboardButton("🔄 Renew Plan", callback_data="plan_menu"),
+                                InlineKeyboardButton("👥 Refer & Earn", callback_data="plan_refer"),
+                            ]])
+                        )
+                    except Exception:
+                        pass  # user ne bot block kiya hoga
+
+        except Exception as e:
+            log.error(f"expiry_reminder_task error: {e}")
+
+        await asyncio.sleep(3600)  # 1 ghanta wait
+
+
+# Bot startup pe reminder task start karo
+@Bot.on_message(filters.command("start") & filters.private, group=-999)
+async def _start_reminder_once(client: Bot, message):
+    """Ek baar reminder task start karo — dirty trick since no on_start hook."""
+    if not hasattr(client, "_reminder_task_started"):
+        client._reminder_task_started = True
+        asyncio.create_task(expiry_reminder_task(client))
