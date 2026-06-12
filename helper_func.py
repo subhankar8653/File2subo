@@ -23,13 +23,16 @@ async def decode(string: str) -> str:
 # ── Force Sub filter ──────────────────────────────────────────────
 
 async def is_subscribed(filter, client, update):
-    from database.database import get_fsub_channels
+    from database.database import get_fsub_channels, get_fsub_request_mode, has_fsub_request
     user_id = update.from_user.id
     if user_id in ADMINS:
         return True
     fsubs = await get_fsub_channels()
     if not fsubs:
         return True
+
+    req_mode = await get_fsub_request_mode()
+
     for ch_id in fsubs:
         try:
             member = await client.get_chat_member(chat_id=ch_id, user_id=user_id)
@@ -40,6 +43,9 @@ async def is_subscribed(filter, client, update):
             ]:
                 return False
         except UserNotParticipant:
+            # Request mode ON hai — check karo ki user ne request bheja hai
+            if req_mode and await has_fsub_request(ch_id, user_id):
+                continue  # Request pending hai — OK maano
             return False
         except Exception:
             pass
