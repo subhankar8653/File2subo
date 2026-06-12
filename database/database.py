@@ -201,7 +201,6 @@ async def has_premium_access(user_id: int) -> bool:
         expiry = doc.get("expiry_time")
         if expiry and datetime.datetime.now() <= expiry:
             return True
-        # Expired — clean karo
         await premium_col.update_one({"_id": user_id}, {"$set": {"expiry_time": None}})
         return False
     except Exception as e:
@@ -344,3 +343,84 @@ async def get_tutorial_status(tutorial_type: str) -> dict:
     except Exception as e:
         logging.error(f"get_tutorial_status error: {e}")
         return {"exists": False, "enabled": False, "file_id": None}
+
+# ── File-to-Link Channel ──────────────────────────────────────────
+
+ftl_col = database["ftl_config"]
+
+async def get_ftl_channel() -> int | None:
+    try:
+        doc = await ftl_col.find_one({"_id": "channel"})
+        return doc["channel_id"] if doc else None
+    except Exception as e:
+        logging.error(f"get_ftl_channel error: {e}")
+        return None
+
+async def set_ftl_channel(channel_id: int) -> bool:
+    try:
+        await ftl_col.update_one(
+            {"_id": "channel"},
+            {"$set": {"channel_id": channel_id}},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logging.error(f"set_ftl_channel error: {e}")
+        return False
+
+async def remove_ftl_channel() -> bool:
+    try:
+        result = await ftl_col.delete_one({"_id": "channel"})
+        return result.deleted_count > 0
+    except Exception as e:
+        logging.error(f"remove_ftl_channel error: {e}")
+        return False
+
+# ── Batch Sessions (channel batch mode) ──────────────────────────
+
+ftl_batch_col = database["ftl_batch_sessions"]
+
+async def ftl_batch_start(channel_id: int) -> bool:
+    try:
+        await ftl_batch_col.update_one(
+            {"_id": channel_id},
+            {"$set": {"_id": channel_id, "files": [], "started_at": datetime.datetime.utcnow()}},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logging.error(f"ftl_batch_start error: {e}")
+        return False
+
+async def ftl_batch_add(channel_id: int, msg_id: int, file_name: str) -> bool:
+    try:
+        await ftl_batch_col.update_one(
+            {"_id": channel_id},
+            {"$push": {"files": {"msg_id": msg_id, "name": file_name}}},
+        )
+        return True
+    except Exception as e:
+        logging.error(f"ftl_batch_add error: {e}")
+        return False
+
+async def ftl_batch_get(channel_id: int) -> list:
+    try:
+        doc = await ftl_batch_col.find_one({"_id": channel_id})
+        return doc["files"] if doc else []
+    except Exception as e:
+        logging.error(f"ftl_batch_get error: {e}")
+        return []
+
+async def ftl_batch_exists(channel_id: int) -> bool:
+    try:
+        return bool(await ftl_batch_col.find_one({"_id": channel_id}))
+    except Exception:
+        return False
+
+async def ftl_batch_clear(channel_id: int) -> bool:
+    try:
+        await ftl_batch_col.delete_one({"_id": channel_id})
+        return True
+    except Exception as e:
+        logging.error(f"ftl_batch_clear error: {e}")
+        return False
