@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 # Premium kharidne ke liye user is account ko message karega.
 # "Buy This Plan" pe click karte hi plan ka naam/duration/price prefilled
 # message ke saath is account ko bhej diya jaata hai.
-PREMIUM_CONTACT_USERNAME = "Cineplexpremium"
+PREMIUM_CONTACT_USERNAME = "Sbanime_Premium_robot"
 PREMIUM_CONTACT_URL = f"https://t.me/{PREMIUM_CONTACT_USERNAME}"
 
 
@@ -430,14 +430,34 @@ async def cmd_plan(client: Bot, message: Message):
 def _premium_overview_text(mention: str) -> str:
     return (
         f"👋 <b>Hey {mention},</b>\n\n"
-        f"<blockquote>🎁 <b>Premium Feature Benefits:</b></blockquote>\n\n"
-        f"✅ No need to open links / no FSub\n"
-        f"✅ Get direct files — fast priority\n"
-        f"✅ Ad-free experience (no link shortener)\n"
-        f"✅ High-speed download links\n"
-        f"✅ Full admin support\n\n"
-        f"📌 Select a plan below to see price & duration.\n"
-        f"📌 Check your active plan: /myplan"
+        f"<blockquote>🎁 <b>Premium Membership — Suhani Bots</b>\n"
+        f"Sirf ₹40/30 days | All bots included!</blockquote>\n\n"
+        f"<b>🤖 Bots Covered:</b>\n"
+        f"┌ <b>@SenpaiSyncbot</b> — Anime link bot\n"
+        f"│ No shortner · No FSub · Direct channel link\n"
+        f"│\n"
+        f"├ <b>@Get_Suhani_bot</b> — Anime file bot\n"
+        f"│ No shortner · No FSub · Direct files\n"
+        f"│ Online watch · Media info · Fast download\n"
+        f"│\n"
+        f"├ <b>@Suhani_filter_bot</b> — Anime search bot\n"
+        f"│ Search anime in DM · AI chat in DM\n"
+        f"│\n"
+        f"├ <b>@Miss_suhani_bot</b> — Group protection + AI\n"
+        f"│ Use in your group · AI feature included\n"
+        f"│\n"
+        f"├ <b>@My_Suhani_bot</b> — Movie search bot\n"
+        f"│ No shortner · No FSub · Direct files\n"
+        f"│ Online watch · Media info · Fast support\n"
+        f"│\n"
+        f"└ <b>🔞 Hanime Private Channel</b>\n"
+        f"  No shortner · Direct videos · Contact to get access\n\n"
+        f"<b>🎯 Extra Benefits:</b>\n"
+        f"⭐ Koi bhi anime/movie request karo — admin puri koshish karega\n"
+        f"⭐ Future new bots ka premium bhi is plan mein aayega\n"
+        f"⭐ Fast support via @Sbanime_Premium_robot\n\n"
+        f"📌 Plan details ke liye neeche buttons tap karo.\n"
+        f"📌 Active plan check karo: /myplan"
     )
 
 
