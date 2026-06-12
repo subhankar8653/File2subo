@@ -1,14 +1,18 @@
+import datetime
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import MONGO_URI, DB_NAME
 
 dbclient = AsyncIOMotorClient(MONGO_URI)
 database = dbclient[DB_NAME]
 
-user_col    = database["users"]
-admin_col   = database["admins"]
-banned_col  = database["banned"]
-fsub_col    = database["fsub_channels"]
-settings_col = database["settings"]
+user_col         = database["users"]
+admin_col        = database["admins"]
+banned_col       = database["banned"]
+fsub_col         = database["fsub_channels"]
+settings_col     = database["settings"]
+fake_link_col    = database["fake_link"]
+fsub_requests_col = database["fsub_pending_requests"]
 
 # ── Users ─────────────────────────────────────────────────────────
 
@@ -59,8 +63,6 @@ async def unban_user(user_id: int):
     await banned_col.delete_one({"_id": user_id})
 
 # ── Force Sub ─────────────────────────────────────────────────────
-# Document structure: { _id: channel_id, custom_name: "..." }
-# custom_name optional — agar set nahi hai toh channel ka actual title use hoga
 
 async def add_fsub(channel_id: int):
     if not await fsub_col.find_one({"_id": channel_id}):
@@ -73,14 +75,10 @@ async def get_fsub_channels() -> list:
     return [doc["_id"] async for doc in fsub_col.find()]
 
 async def get_fsub_channel_name(channel_id: int) -> str | None:
-    """Custom button name fetch karo. None return hoga agar set nahi."""
     doc = await fsub_col.find_one({"_id": channel_id})
-    if doc:
-        return doc.get("custom_name") or None
-    return None
+    return (doc.get("custom_name") or None) if doc else None
 
 async def set_fsub_channel_name(channel_id: int, custom_name: str) -> bool:
-    """FSub channel ka custom button name set karo."""
     try:
         result = await fsub_col.update_one(
             {"_id": channel_id},
@@ -89,21 +87,15 @@ async def set_fsub_channel_name(channel_id: int, custom_name: str) -> bool:
         )
         return result.matched_count > 0
     except Exception as e:
-        import logging; logging.error(f"set_fsub_channel_name error: {e}")
+        logging.error(f"set_fsub_channel_name error: {e}")
         return False
 
 async def clear_fsub_channel_name(channel_id: int):
-    """Custom name hata do — wapas actual channel title use hoga."""
     await fsub_col.update_one({"_id": channel_id}, {"$unset": {"custom_name": ""}})
 
-# ── Pending FSub Requests (Request Mode) ─────────────────────────
-# Jab user join request bhejta hai, uska record yahan save hoga.
-# Jab request approve ho jaaye, record hata denge.
-
-fsub_requests_col = database["fsub_pending_requests"]
+# ── FSub Pending Requests ─────────────────────────────────────────
 
 async def add_fsub_request(channel_id: int, user_id: int):
-    """User ki pending join request record karo."""
     doc_id = f"{channel_id}_{user_id}"
     if not await fsub_requests_col.find_one({"_id": doc_id}):
         await fsub_requests_col.insert_one({
@@ -113,24 +105,20 @@ async def add_fsub_request(channel_id: int, user_id: int):
         })
 
 async def has_fsub_request(channel_id: int, user_id: int) -> bool:
-    """Check karo ki user ne is channel ke liye join request bheja hai ya nahi."""
     doc_id = f"{channel_id}_{user_id}"
     return bool(await fsub_requests_col.find_one({"_id": doc_id}))
 
 async def remove_fsub_request(channel_id: int, user_id: int):
-    """Approved/rejected request ka record hata do."""
     doc_id = f"{channel_id}_{user_id}"
     await fsub_requests_col.delete_one({"_id": doc_id})
 
 # ── Request Mode ──────────────────────────────────────────────────
 
 async def get_fsub_request_mode() -> bool:
-    """Global request mode — agar True hai to FSub channels join-request link banayenge."""
     doc = await settings_col.find_one({"_id": "request_mode"})
     return bool(doc["value"]) if doc else False
 
 async def set_fsub_request_mode(enabled: bool):
-    """Global request mode on/off karo."""
     await settings_col.update_one(
         {"_id": "request_mode"},
         {"$set": {"value": enabled}},
@@ -148,10 +136,7 @@ async def set_setting(key: str, value):
 
 # ── Fake Link ─────────────────────────────────────────────────────
 
-fake_link_col = database["fake_link"]
-
 async def set_fake_link(url: str, button_text: str) -> bool:
-    """Fake link set karo — FSub message mein sabse pehle button dikhega."""
     try:
         await fake_link_col.update_one(
             {"_id": "config"},
@@ -160,25 +145,202 @@ async def set_fake_link(url: str, button_text: str) -> bool:
         )
         return True
     except Exception as e:
-        import logging; logging.error(f"set_fake_link error: {e}")
+        logging.error(f"set_fake_link error: {e}")
         return False
 
 async def get_fake_link() -> dict | None:
-    """Fake link config fetch karo. None return hoga agar set nahi ya disabled ho."""
     try:
         doc = await fake_link_col.find_one({"_id": "config"})
         if doc and doc.get("enabled"):
             return {"url": doc["url"], "button_text": doc["button_text"]}
         return None
     except Exception as e:
-        import logging; logging.error(f"get_fake_link error: {e}")
+        logging.error(f"get_fake_link error: {e}")
         return None
 
 async def remove_fake_link() -> bool:
-    """Fake link hata do."""
     try:
         result = await fake_link_col.delete_one({"_id": "config"})
         return result.deleted_count > 0
     except Exception as e:
-        import logging; logging.error(f"remove_fake_link error: {e}")
+        logging.error(f"remove_fake_link error: {e}")
         return False
+
+# ── Bot Config (shortener, tutorial, etc.) ───────────────────────
+
+bot_config_col = database["bot_config"]
+
+async def get_bot_config() -> dict:
+    doc = await bot_config_col.find_one({"_id": "main"})
+    return doc or {}
+
+async def set_bot_config(key: str, value) -> None:
+    await bot_config_col.update_one(
+        {"_id": "main"}, {"$set": {key: value}}, upsert=True
+    )
+
+# ── Shortener ─────────────────────────────────────────────────────
+
+async def get_shortener_settings() -> dict:
+    cfg = await get_bot_config()
+    return {
+        "enabled": cfg.get("shortener_enabled", False),
+        "api":     cfg.get("shortener_api", ""),
+        "website": cfg.get("shortener_website", ""),
+    }
+
+# ── Premium ───────────────────────────────────────────────────────
+
+premium_col = database["premium_users"]
+
+async def has_premium_access(user_id: int) -> bool:
+    try:
+        doc = await premium_col.find_one({"_id": user_id})
+        if not doc:
+            return False
+        expiry = doc.get("expiry_time")
+        if expiry and datetime.datetime.now() <= expiry:
+            return True
+        # Expired — clean karo
+        await premium_col.update_one({"_id": user_id}, {"$set": {"expiry_time": None}})
+        return False
+    except Exception as e:
+        logging.error(f"has_premium_access error: {e}")
+        return False
+
+async def get_premium_expiry(user_id: int):
+    try:
+        doc = await premium_col.find_one({"_id": user_id})
+        return doc.get("expiry_time") if doc else None
+    except Exception as e:
+        logging.error(f"get_premium_expiry error: {e}")
+        return None
+
+async def add_premium(user_id: int, seconds: int) -> bool:
+    try:
+        expiry = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+        await premium_col.update_one(
+            {"_id": user_id},
+            {"$set": {"expiry_time": expiry}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logging.error(f"add_premium error: {e}")
+        return False
+
+async def remove_premium(user_id: int) -> bool:
+    try:
+        result = await premium_col.update_one({"_id": user_id}, {"$set": {"expiry_time": None}})
+        return result.matched_count > 0
+    except Exception as e:
+        logging.error(f"remove_premium error: {e}")
+        return False
+
+async def get_all_premium_users() -> list:
+    try:
+        cursor = premium_col.find({"expiry_time": {"$gt": datetime.datetime.now()}})
+        return [doc async for doc in cursor]
+    except Exception as e:
+        logging.error(f"get_all_premium_users error: {e}")
+        return []
+
+# ── Verify Tokens (Shortener flow) ───────────────────────────────
+
+verify_tokens_col = database["verify_tokens"]
+
+async def create_verify_token(user_id: int, token: str) -> bool:
+    try:
+        await verify_tokens_col.update_one(
+            {"token": token},
+            {"$set": {
+                "token":      token,
+                "user_id":    user_id,
+                "created_at": datetime.datetime.now(),
+                "used":       False,
+            }},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logging.error(f"create_verify_token error: {e}")
+        return False
+
+async def get_verify_token(token: str) -> dict:
+    try:
+        doc = await verify_tokens_col.find_one({"token": token})
+        return dict(doc) if doc else {}
+    except Exception as e:
+        logging.error(f"get_verify_token error: {e}")
+        return {}
+
+async def mark_token_used(token: str) -> bool:
+    try:
+        await verify_tokens_col.update_one({"token": token}, {"$set": {"used": True}})
+        return True
+    except Exception as e:
+        logging.error(f"mark_token_used error: {e}")
+        return False
+
+async def delete_old_tokens():
+    try:
+        cutoff = datetime.datetime.now() - datetime.timedelta(hours=1)
+        await verify_tokens_col.delete_many({"created_at": {"$lt": cutoff}})
+    except Exception as e:
+        logging.error(f"delete_old_tokens error: {e}")
+
+# ── Tutorial ──────────────────────────────────────────────────────
+
+tutorial_col = database["tutorial_config"]
+
+async def set_tutorial(tutorial_type: str, file_id: str) -> bool:
+    try:
+        await tutorial_col.update_one(
+            {"_id": tutorial_type},
+            {"$set": {
+                "_id":        tutorial_type,
+                "file_id":    file_id,
+                "enabled":    True,
+                "updated_at": datetime.datetime.utcnow(),
+            }},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logging.error(f"set_tutorial error: {e}")
+        return False
+
+async def get_tutorial(tutorial_type: str) -> dict | None:
+    try:
+        doc = await tutorial_col.find_one({"_id": tutorial_type})
+        if doc and doc.get("enabled", False):
+            return {"file_id": doc["file_id"]}
+        return None
+    except Exception as e:
+        logging.error(f"get_tutorial error: {e}")
+        return None
+
+async def toggle_tutorial(tutorial_type: str, enabled: bool) -> bool:
+    try:
+        result = await tutorial_col.update_one(
+            {"_id": tutorial_type},
+            {"$set": {"enabled": enabled, "updated_at": datetime.datetime.utcnow()}}
+        )
+        return result.matched_count > 0
+    except Exception as e:
+        logging.error(f"toggle_tutorial error: {e}")
+        return False
+
+async def get_tutorial_status(tutorial_type: str) -> dict:
+    try:
+        doc = await tutorial_col.find_one({"_id": tutorial_type})
+        if not doc:
+            return {"exists": False, "enabled": False, "file_id": None}
+        return {
+            "exists":   True,
+            "enabled":  doc.get("enabled", False),
+            "file_id":  doc.get("file_id"),
+        }
+    except Exception as e:
+        logging.error(f"get_tutorial_status error: {e}")
+        return {"exists": False, "enabled": False, "file_id": None}
