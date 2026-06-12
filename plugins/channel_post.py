@@ -16,7 +16,9 @@ from helper_func import encode
                       "addadmin", "removeadmin", "ban", "unban", "addsub", "removesub", "protect",
                       "settings", "cancel",
                       "addpremium", "removepremium", "premiumusers", "premiuminfo",
-                      "myplan", "plan"])
+                      "myplan", "plan",
+                      "setfakelink", "deletefakelink", "listfakelink",
+                      "listsub", "listadmin"])
 )
 async def channel_post(client: Client, message: Message):
     reply_text = await message.reply("⏳ Please wait...", quote=True)
